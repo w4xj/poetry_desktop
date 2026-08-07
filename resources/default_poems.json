@@ -1,0 +1,32 @@
+﻿{
+  "schemaVersion": 1,
+  "poems": [
+    {
+      "id": "default-001",
+      "title": "静夜思",
+      "author": "李白",
+      "dynasty": "唐",
+      "content": "床前明月光\n疑是地上霜\n举头望明月\n低头思故乡",
+      "tags": ["唐诗", "思乡"],
+      "enabled": true
+    },
+    {
+      "id": "default-002",
+      "title": "山居秋暝",
+      "author": "王维",
+      "dynasty": "唐",
+      "content": "空山新雨后，天气晚来秋。\n明月松间照，清泉石上流。",
+      "tags": ["山水", "唐诗"],
+      "enabled": true
+    },
+    {
+      "id": "default-003",
+      "title": "饮酒·其五",
+      "author": "陶渊明",
+      "dynasty": "晋",
+      "content": "采菊东篱下，悠然见南山。\n山气日夕佳，飞鸟相与还。",
+      "tags": ["闲适"],
+      "enabled": true
+    }
+  ]
+}

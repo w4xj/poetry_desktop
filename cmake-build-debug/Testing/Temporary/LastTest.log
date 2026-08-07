@@ -1,0 +1,63 @@
+Start testing: Aug 07 17:47 中国标准时间
+----------------------------------------------------------
+1/2 Testing: poetry_core_tests
+1/2 Test: poetry_core_tests
+Command: "E:/cProject/poetry_desktop/cmake-build-debug/poetry_tests.exe"
+Directory: E:/cProject/poetry_desktop/cmake-build-debug
+"poetry_core_tests" start time: Aug 07 17:47 中国标准时间
+Output:
+----------------------------------------------------------
+********* Start testing of CoreTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by GCC 13.1.0), windows 10
+PASS   : CoreTests::initTestCase()
+PASS   : CoreTests::poemImportAndValidation()
+PASS   : CoreTests::invalidImportDoesNotChangeLibrary()
+PASS   : CoreTests::randomPickerAvoidsConsecutive()
+PASS   : CoreTests::rendererCreatesTargetWithText()
+PASS   : CoreTests::fontSettingChangesRenderedOutput()
+PASS   : CoreTests::rendererUsesLayeredSectionColors()
+PASS   : CoreTests::rendererHandlesEmptySectionFields()
+PASS   : CoreTests::rendererHandlesResolutionsAndLongText()
+PASS   : CoreTests::rendererFallsBackForUnavailableChineseFont()
+PASS   : CoreTests::oversizedPoemReturnsError()
+PASS   : CoreTests::imageScanRecursesAndDeduplicates()
+PASS   : CoreTests::configRoundTripAndCorruptionRecovery()
+PASS   : CoreTests::wallpaperServiceKeepsFailureSafe()
+PASS   : CoreTests::cacheCleanupPreservesCurrent()
+PASS   : CoreTests::cacheCleanupProtectsActiveWallpaperAcrossPreviews()
+PASS   : CoreTests::cleanupTestCase()
+Totals: 17 passed, 0 failed, 0 skipped, 0 blacklisted, 5508ms
+********* Finished testing of CoreTests *********
+<end of output>
+Test time =   5.87 sec
+----------------------------------------------------------
+Test Passed.
+"poetry_core_tests" end time: Aug 07 17:48 中国标准时间
+"poetry_core_tests" time elapsed: 00:00:05
+----------------------------------------------------------
+
+2/2 Testing: poetry_ui_tests
+2/2 Test: poetry_ui_tests
+Command: "E:/cProject/poetry_desktop/cmake-build-debug/poetry_ui_tests.exe"
+Directory: E:/cProject/poetry_desktop/cmake-build-debug
+"poetry_ui_tests" start time: Aug 07 17:48 中国标准时间
+Output:
+----------------------------------------------------------
+********* Start testing of UiTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by GCC 13.1.0), windows 10
+PASS   : UiTests::initTestCase()
+PASS   : UiTests::mainWindowExposesReadablePrimaryActions()
+PASS   : UiTests::poemManagementActionsArePresent()
+PASS   : UiTests::scheduleControlsExposeSafeBounds()
+PASS   : UiTests::cleanupTestCase()
+Totals: 5 passed, 0 failed, 0 skipped, 0 blacklisted, 481ms
+********* Finished testing of UiTests *********
+<end of output>
+Test time =   0.82 sec
+----------------------------------------------------------
+Test Passed.
+"poetry_ui_tests" end time: Aug 07 17:48 中国标准时间
+"poetry_ui_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Aug 07 17:48 中国标准时间
