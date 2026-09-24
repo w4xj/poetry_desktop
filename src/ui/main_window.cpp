@@ -20,6 +20,7 @@
 #include <QFileInfo>
 #include <QFontComboBox>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QImageReader>
@@ -29,6 +30,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPalette>
 #include <QPushButton>
 #include <QScreen>
 #include <QSignalBlocker>
@@ -64,7 +66,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_picker(static_cast<quint32>(QDateTime::currentMSecsSinceEpoch() & 0xffffffffu)) {
     setWindowTitle(QStringLiteral("诗词壁纸"));
     setMinimumSize(980, 680);
-    resize(1280, 900);
+    resize(1440, 900);
     setupUi();
     setupTray();
     loadState();
@@ -85,35 +87,99 @@ MainWindow::~MainWindow() {
 
 void MainWindow::setupUi() {
     auto *central = new QWidget(this);
-    // Readability baseline: 12 pt UI text, 36 px primary actions, and 8 px
-    // spacing rhythm. These values remain legible on 100% DPI and scale with
-    // the platform font on high-DPI screens.
+    central->setObjectName(QStringLiteral("rootCanvas"));
+    // 12 pt keeps every control legible at 100 % DPI. The type ramp below is
+    // applied through object-name selectors rather than by shrinking the base
+    // font, so nothing depends on stylesheet inheritance to stay readable.
     QFont uiFont = font();
     uiFont.setPointSize(12);
     setFont(uiFont);
+    QPalette base = palette();
+    base.setColor(QPalette::Window, QColor(QStringLiteral("#eef2f7")));
+    setPalette(base);
     setStyleSheet(QStringLiteral(R"(
-        QMainWindow, QWidget { color: #243244; }
-        QGroupBox { border: 1px solid #d9e1ea; border-radius: 10px; margin-top: 12px; padding: 18px 12px 12px; font-size: 13pt; font-weight: 600; background: #ffffff; }
-        QGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 6px; color: #1c3854; }
-        QPushButton, QToolButton { min-height: 36px; padding: 6px 14px; border: 1px solid #c7d3df; border-radius: 7px; background: #f8fafc; font-size: 12pt; }
-        QPushButton:hover, QToolButton:hover { background: #eaf3fb; border-color: #78a9d2; }
-        QPushButton:disabled { color: #9aa8b5; background: #eef2f5; }
-        QComboBox, QFontComboBox, QSpinBox, QLineEdit { min-height: 34px; padding: 3px 8px; font-size: 12pt; }
-        QListWidget, QTableWidget, QTextEdit { font-size: 12pt; }
-        QListWidget::item { min-height: 32px; padding: 4px; }
-        QTableWidget { gridline-color: #e2e8f0; alternate-background-color: #f7fafc; }
-        QHeaderView::section { min-height: 34px; padding: 4px 8px; font-size: 11pt; font-weight: 600; background: #edf3f8; }
-        QTabBar::tab { min-height: 38px; padding: 6px 18px; font-size: 12pt; }
-        QLabel { font-size: 12pt; }
+        QWidget#rootCanvas { background: #eef2f7; }
+
+        QLabel { color: #1f2937; font-size: 12pt; }
+        QLabel#appTitleLabel { font-size: 20pt; font-weight: 700; color: #0f172a; }
+        QLabel#appSubtitleLabel { font-size: 10pt; color: #64748b; }
+        QLabel#resourceSummaryLabel, QLabel#scheduleSummaryLabel { font-size: 11pt; color: #475569; }
+        QLabel#previewHintLabel, QLabel#statusLabel, QLabel#imageScanStatusLabel,
+        QLabel#selectedImageInfoLabel, QLabel#poemCountLabel, QLabel#scheduleNextLabel,
+        QLabel#fieldHintLabel { font-size: 10pt; color: #64748b; }
+        QLabel#previewContentLabel { font-size: 11pt; color: #334155; }
+        QLabel#sectionTitleLabel { font-size: 11pt; font-weight: 700; color: #334155; }
+        QLabel#previewLabel { background: #10151d; color: #8d99a8; border: 1px solid #2a3441; border-radius: 10px; }
+
+        QGroupBox { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;
+                    margin-top: 13px; padding: 14px 14px 12px; font-size: 11pt; font-weight: 700; color: #334155; }
+        QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }
+
+        QPushButton { min-height: 34px; padding: 5px 14px; border: 1px solid #cbd5e1; border-radius: 8px;
+                      background: #ffffff; color: #1f2937; font-size: 12pt; }
+        QPushButton:hover { background: #f1f5f9; border-color: #94a3b8; }
+        QPushButton:pressed { background: #e2e8f0; }
+        QPushButton:disabled { color: #a3afbd; background: #f4f6f9; border-color: #e4e9ef; }
+        QPushButton#switchWallpaperButton { min-height: 48px; background: #2563eb; border: none;
+                                            color: #ffffff; font-size: 14pt; font-weight: 700; }
+        QPushButton#switchWallpaperButton:hover { background: #1d4ed8; }
+        QPushButton#switchWallpaperButton:pressed { background: #1e40af; }
+        QPushButton#switchWallpaperButton:disabled { background: #c3d3f2; color: #f2f6fd; }
+        QPushButton#applyPreviewButton { border-color: #2563eb; color: #1d4ed8; font-weight: 600; }
+        QPushButton#applyPreviewButton:hover { background: #eaf1fe; }
+        QPushButton#applyPreviewButton:disabled { border-color: #e4e9ef; color: #a3afbd; font-weight: 400; }
+        QPushButton#removeImageDirectoryButton, QPushButton#deletePoemButton, QPushButton#clearCacheButton { color: #b42318; border-color: #e6c8c5; }
+        QPushButton#removeImageDirectoryButton:hover, QPushButton#deletePoemButton:hover, QPushButton#clearCacheButton:hover { background: #fdf1f0; border-color: #d99b95; }
+        QPushButton#resetDisplaySettingsButton { border-color: transparent; background: transparent; color: #475569; }
+        QPushButton#resetDisplaySettingsButton:hover { background: #f1f5f9; border-color: #cbd5e1; }
+
+        QToolButton#moreMenuButton { min-height: 34px; padding: 5px 12px; border: 1px solid #cbd5e1;
+                                     border-radius: 8px; background: #ffffff; color: #1f2937; font-size: 12pt; }
+        QToolButton#moreMenuButton:hover { background: #f1f5f9; border-color: #94a3b8; }
+
+        QComboBox, QFontComboBox, QSpinBox, QLineEdit { min-height: 32px; padding: 2px 8px;
+                                                        border: 1px solid #cbd5e1; border-radius: 8px;
+                                                        background: #ffffff; color: #1f2937; font-size: 12pt; }
+        QComboBox:focus, QFontComboBox:focus, QSpinBox:focus, QLineEdit:focus { border-color: #2563eb; }
+
+        QListWidget, QTableWidget, QTextEdit { border: 1px solid #e2e8f0; border-radius: 8px;
+                                               background: #ffffff; color: #1f2937; font-size: 12pt; }
+        QListWidget::item { min-height: 30px; padding: 3px 4px; }
+        QListWidget::item:selected { background: #e0eafe; color: #14336b; }
+        QTableWidget { gridline-color: #eef2f6; alternate-background-color: #f8fafc; }
+        QTableWidget::item:selected { background: #e0eafe; color: #14336b; }
+        QHeaderView::section { min-height: 32px; padding: 4px 8px; border: none;
+                               border-bottom: 1px solid #e2e8f0; background: #f8fafc;
+                               font-size: 11pt; font-weight: 600; color: #475569; }
+        QCheckBox { font-size: 12pt; color: #1f2937; spacing: 8px; }
+
+        QTabWidget::pane { border: none; }
+        QTabBar { background: transparent; }
+        QTabBar::tab { min-height: 32px; padding: 5px 14px; margin-right: 6px;
+                       border: 1px solid transparent; border-radius: 8px;
+                       background: transparent; color: #5b6b7f; font-size: 11pt; }
+        QTabBar::tab:selected { background: #ffffff; border-color: #dde5ee; color: #0f172a; font-weight: 600; }
+        QTabBar::tab:!selected:hover { color: #1f2937; }
+
+        QMenu { background: #ffffff; border: 1px solid #dde5ee; border-radius: 8px; padding: 4px; }
+        QMenu::item { padding: 6px 20px; border-radius: 6px; }
+        QMenu::item:selected { background: #eaf1fe; color: #14336b; }
+        QMenu::separator { height: 1px; background: #e8edf3; margin: 4px 8px; }
     )"));
     auto *root = new QVBoxLayout(central);
-    root->setContentsMargins(18, 16, 18, 16);
-    root->setSpacing(14);
+    root->setContentsMargins(20, 16, 20, 12);
+    root->setSpacing(12);
 
     auto *topBar = new QHBoxLayout();
+    topBar->setSpacing(12);
+    auto *brandCol = new QVBoxLayout();
+    brandCol->setSpacing(1);
     auto *title = new QLabel(QStringLiteral("诗词壁纸"), central);
     title->setObjectName(QStringLiteral("appTitleLabel"));
-    title->setStyleSheet(QStringLiteral("font-size:22pt;font-weight:700;color:#17324d;"));
+    auto *subtitle = new QLabel(QStringLiteral("本地图片 × 诗词，合成桌面壁纸"), central);
+    subtitle->setObjectName(QStringLiteral("appSubtitleLabel"));
+    brandCol->addWidget(title);
+    brandCol->addWidget(subtitle);
     m_desktopStateLabel = new QLabel(QStringLiteral("尚未生成预览"), central);
     m_desktopStateLabel->setObjectName(QStringLiteral("desktopStateLabel"));
     m_countsLabel = new QLabel(central);
@@ -135,84 +201,98 @@ void MainWindow::setupUi() {
     connect(openLogAction, &QAction::triggered, this, &MainWindow::openLogDirectory);
     connect(clearCacheAction, &QAction::triggered, this, &MainWindow::clearCache);
     connect(quitAction, &QAction::triggered, this, &MainWindow::quitFromTray);
-    topBar->addWidget(title);
-    topBar->addSpacing(14);
+    topBar->addLayout(brandCol);
+    topBar->addSpacing(6);
     topBar->addWidget(m_desktopStateLabel);
     topBar->addStretch();
     topBar->addWidget(m_countsLabel);
     topBar->addSpacing(14);
     topBar->addWidget(m_scheduleSummaryLabel);
-    topBar->addSpacing(8);
     topBar->addWidget(moreButton);
     root->addLayout(topBar);
 
-    auto *mainSplitter = new QSplitter(Qt::Horizontal, central);
-    mainSplitter->setObjectName(QStringLiteral("mainContentSplitter"));
-    mainSplitter->setChildrenCollapsible(false);
-    auto *previewGroup = new QGroupBox(QStringLiteral("壁纸预览"), mainSplitter);
-    previewGroup->setMinimumWidth(560);
+    auto *body = new QSplitter(Qt::Horizontal, central);
+    body->setObjectName(QStringLiteral("mainContentSplitter"));
+    body->setChildrenCollapsible(false);
+    body->setHandleWidth(12);
+
+    auto *previewGroup = new QGroupBox(QStringLiteral("壁纸预览"), body);
+    previewGroup->setMinimumWidth(520);
     auto *previewLayout = new QVBoxLayout(previewGroup);
+    previewLayout->setSpacing(8);
     m_previewLabel = new QLabel(QStringLiteral("还没有可用预览\n请先添加图片目录并导入诗词库"), previewGroup);
     m_previewLabel->setObjectName(QStringLiteral("previewLabel"));
     m_previewLabel->setAlignment(Qt::AlignCenter);
-    m_previewLabel->setMinimumSize(640, 400);
+    m_previewLabel->setMinimumSize(620, 380);
     m_previewLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_previewLabel->setStyleSheet(QStringLiteral("background:#202020;color:#bdbdbd;border:1px solid #505050;"));
     m_previewLabel->installEventFilter(this);
     previewLayout->addWidget(m_previewLabel, 1);
     m_previewHintLabel = new QLabel(QStringLiteral("修改显示设置后会实时更新预览，不会自动修改桌面。"), previewGroup);
     m_previewHintLabel->setObjectName(QStringLiteral("previewHintLabel"));
     m_previewHintLabel->setWordWrap(true);
     previewLayout->addWidget(m_previewHintLabel);
+    body->addWidget(previewGroup);
 
-    auto *quickGroup = new QGroupBox(QStringLiteral("快速操作"), mainSplitter);
-    quickGroup->setMinimumWidth(270);
-    auto *quickLayout = new QVBoxLayout(quickGroup);
-    m_switchButton = new QPushButton(QStringLiteral("随机换一张壁纸"), quickGroup);
+    auto *rail = new QWidget(body);
+    rail->setObjectName(QStringLiteral("sideRail"));
+    rail->setMinimumWidth(470);
+    auto *railLayout = new QVBoxLayout(rail);
+    railLayout->setContentsMargins(0, 0, 0, 0);
+    railLayout->setSpacing(12);
+
+    auto *actionGroup = new QGroupBox(QStringLiteral("操作"), rail);
+    auto *actionLayout = new QVBoxLayout(actionGroup);
+    actionLayout->setSpacing(8);
+    m_switchButton = new QPushButton(QStringLiteral("随机换一张壁纸"), actionGroup);
     m_switchButton->setObjectName(QStringLiteral("switchWallpaperButton"));
     m_switchButton->setToolTip(QStringLiteral("\u968f\u673a\u9009\u62e9\u4e00\u5f20\u56fe\u7247\u548c\u4e00\u9996\u542f\u7528\u8bd7\u8bcd\uff0c\u751f\u6210\u5e76\u8bbe\u7f6e\u684c\u9762\u58c1\u7eb8"));
     m_switchButton->setMinimumHeight(48);
-    m_switchButton->setStyleSheet(QStringLiteral("font-weight:700;font-size:14pt;background:#256b9f;color:white;border:0;"));
-    m_applyPreviewButton = new QPushButton(QStringLiteral("应用当前预览"), quickGroup);
+    m_applyPreviewButton = new QPushButton(QStringLiteral("应用当前预览"), actionGroup);
     m_applyPreviewButton->setObjectName(QStringLiteral("applyPreviewButton"));
     m_applyPreviewButton->setToolTip(QStringLiteral("\u628a\u5f53\u524d\u9884\u89c8\u76f4\u63a5\u5e94\u7528\u5230 Windows \u684c\u9762\uff0c\u4e0d\u91cd\u65b0\u968f\u673a\u5185\u5bb9"));
-    m_refreshPreviewButton = new QPushButton(QStringLiteral("重新预览"), quickGroup);
+    m_refreshPreviewButton = new QPushButton(QStringLiteral("重新预览"), actionGroup);
     m_refreshPreviewButton->setObjectName(QStringLiteral("refreshPreviewButton"));
-    m_pauseButton = new QPushButton(QStringLiteral("开启定时"), quickGroup);
+    m_pauseButton = new QPushButton(QStringLiteral("开启定时"), actionGroup);
     m_pauseButton->setObjectName(QStringLiteral("pauseScheduleButton"));
     m_pauseButton->setToolTip(QStringLiteral("\u5feb\u901f\u5f00\u542f\u6216\u505c\u6b62\u5b9a\u65f6\u5207\u6362"));
-    quickLayout->addWidget(m_switchButton);
-    quickLayout->addWidget(m_applyPreviewButton);
-    quickLayout->addWidget(m_refreshPreviewButton);
-    quickLayout->addWidget(m_pauseButton);
-    quickLayout->addSpacing(12);
-    auto *summaryTitle = new QLabel(QStringLiteral("当前预览内容"), quickGroup);
-    summaryTitle->setStyleSheet(QStringLiteral("font-weight:600;"));
-    quickLayout->addWidget(summaryTitle);
-    m_previewContentLabel = new QLabel(QStringLiteral("暂无"), quickGroup);
+    auto *minorRow = new QHBoxLayout();
+    minorRow->setSpacing(8);
+    minorRow->addWidget(m_refreshPreviewButton);
+    minorRow->addWidget(m_pauseButton);
+    actionLayout->addWidget(m_switchButton);
+    actionLayout->addWidget(m_applyPreviewButton);
+    actionLayout->addLayout(minorRow);
+    auto *summaryTitle = new QLabel(QStringLiteral("当前预览内容"), actionGroup);
+    summaryTitle->setObjectName(QStringLiteral("sectionTitleLabel"));
+    m_previewContentLabel = new QLabel(QStringLiteral("暂无"), actionGroup);
     m_previewContentLabel->setObjectName(QStringLiteral("previewContentLabel"));
     m_previewContentLabel->setWordWrap(true);
-    m_previewContentLabel->setMinimumHeight(90);
-    quickLayout->addWidget(m_previewContentLabel);
-    m_statusLabel = new QLabel(QStringLiteral("准备就绪"), quickGroup);
-    m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
-    m_statusLabel->setWordWrap(true);
-    m_statusLabel->setStyleSheet(QStringLiteral("color:#555;"));
-    quickLayout->addWidget(m_statusLabel);
-    quickLayout->addStretch();
-    mainSplitter->addWidget(previewGroup);
-    mainSplitter->addWidget(quickGroup);
-    mainSplitter->setStretchFactor(0, 7);
-    mainSplitter->setStretchFactor(1, 3);
-    root->addWidget(mainSplitter, 3);
+    m_previewContentLabel->setMinimumHeight(66);
+    actionLayout->addSpacing(4);
+    actionLayout->addWidget(summaryTitle);
+    actionLayout->addWidget(m_previewContentLabel);
+    railLayout->addWidget(actionGroup);
 
-    m_tabs = new QTabWidget(central);
+    m_tabs = new QTabWidget(rail);
     m_tabs->setObjectName(QStringLiteral("resourceSettingsTabs"));
     m_tabs->setDocumentMode(true);
     m_tabs->setUsesScrollButtons(true);
-    m_tabs->setMinimumHeight(300);
-    root->addWidget(m_tabs, 2);
+    m_tabs->setMinimumHeight(260);
+    railLayout->addWidget(m_tabs, 1);
+
+    body->addWidget(rail);
+    body->setStretchFactor(0, 6);
+    body->setStretchFactor(1, 5);
+    body->setSizes({860, 640});
+    root->addWidget(body, 1);
+
+    auto *statusStrip = new QHBoxLayout();
+    m_statusLabel = new QLabel(QStringLiteral("准备就绪"), central);
+    m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
+    statusStrip->addWidget(m_statusLabel, 1);
+    root->addLayout(statusStrip);
     setCentralWidget(central);
+
 
     auto *imagePage = makeTabPage(m_tabs, QStringLiteral("图片库"));
     auto *imageRoot = new QVBoxLayout(imagePage);
@@ -270,7 +350,9 @@ void MainWindow::setupUi() {
     imageRoot->addWidget(m_imageScanLabel);
     auto *poemPage = makeTabPage(m_tabs, QStringLiteral("诗词库"));
     auto *poemRoot = new QVBoxLayout(poemPage);
-    auto *poemToolbar = new QHBoxLayout();
+    auto *poemToolbar = new QGridLayout();
+    poemToolbar->setHorizontalSpacing(8);
+    poemToolbar->setVerticalSpacing(8);
     auto *addPoemButton = new QPushButton(QStringLiteral("\u6dfb\u52a0\u8bd7\u8bcd"), poemPage);
     addPoemButton->setObjectName(QStringLiteral("addPoemButton"));
     auto *editPoemButton = new QPushButton(QStringLiteral("\u7f16\u8f91\u9009\u4e2d"), poemPage);
@@ -282,13 +364,12 @@ void MainWindow::setupUi() {
     deletePoemButton->setObjectName(QStringLiteral("deletePoemButton"));
     auto *usePoemButton = new QPushButton(QStringLiteral("使用选中诗词预览"), poemPage);
     usePoemButton->setObjectName(QStringLiteral("useSelectedPoemPreviewButton"));
-    poemToolbar->addWidget(addPoemButton);
-    poemToolbar->addWidget(editPoemButton);
-    poemToolbar->addWidget(importButton);
-    poemToolbar->addWidget(togglePoemButton);
-    poemToolbar->addWidget(deletePoemButton);
-    poemToolbar->addWidget(usePoemButton);
-    poemToolbar->addStretch();
+    poemToolbar->addWidget(addPoemButton, 0, 0);
+    poemToolbar->addWidget(editPoemButton, 0, 1);
+    poemToolbar->addWidget(importButton, 0, 2);
+    poemToolbar->addWidget(togglePoemButton, 1, 0);
+    poemToolbar->addWidget(deletePoemButton, 1, 1);
+    poemToolbar->addWidget(usePoemButton, 1, 2);
     poemRoot->addLayout(poemToolbar);
     m_poemTable = new QTableWidget(poemPage);
     m_poemTable->setObjectName(QStringLiteral("poemTable"));
@@ -306,7 +387,7 @@ void MainWindow::setupUi() {
 
     auto *displayPage = makeTabPage(m_tabs, QStringLiteral("显示设置"));
     auto *displayRoot = new QVBoxLayout(displayPage);
-    auto *displayForm = new QFormLayout();
+    displayRoot->setSpacing(10);
     m_fontCombo = new QFontComboBox(displayPage);
     m_fontCombo->setObjectName(QStringLiteral("fontComboBox"));
     m_fontSizeSpin = new QSpinBox(displayPage);
@@ -342,22 +423,47 @@ void MainWindow::setupUi() {
     m_panelColorButton->setObjectName(QStringLiteral("panelColorButton"));
     m_shadowCheck = new QCheckBox(QStringLiteral("文字阴影"), displayPage);
     m_shadowCheck->setObjectName(QStringLiteral("shadowCheckBox"));
-    displayForm->addRow(QStringLiteral("\u5b57\u4f53\u65cf"), m_fontCombo);
-    displayForm->addRow(QStringLiteral("\u6b63\u6587\u57fa\u51c6\u5b57\u53f7"), m_fontSizeSpin);
-    displayForm->addRow(QStringLiteral("\u6392\u7248\u9884\u8bbe"), m_typographyPreset);
-    displayForm->addRow(QStringLiteral("\u6807\u9898\u989c\u8272"), m_titleColorButton);
-    displayForm->addRow(QStringLiteral("\u4f5c\u8005/\u671d\u4ee3\u989c\u8272"), m_metadataColorButton);
-    displayForm->addRow(QStringLiteral("\u6b63\u6587\u989c\u8272"), m_textColorButton);
-    displayForm->addRow(QStringLiteral("\u6587\u5b57\u4f4d\u7f6e"), m_anchorCombo);
-    displayForm->addRow(QStringLiteral("\u56fe\u7247\u9002\u914d"), m_fitCombo);
+    auto *typeCard = new QGroupBox(QStringLiteral("排版"), displayPage);
+    auto *typeForm = new QFormLayout(typeCard);
+    typeForm->addRow(QStringLiteral("字体族"), m_fontCombo);
+    typeForm->addRow(QStringLiteral("正文基准字号"), m_fontSizeSpin);
+    typeForm->addRow(QStringLiteral("排版预设"), m_typographyPreset);
+    displayRoot->addWidget(typeCard);
+
+    auto *colorCard = new QGroupBox(QStringLiteral("颜色"), displayPage);
+    auto *colorLayout = new QVBoxLayout(colorCard);
+    auto *colorRow = new QHBoxLayout();
+    colorRow->setSpacing(8);
+    const auto addSwatch = [](QHBoxLayout *row, const QString &caption, QPushButton *button) {
+        auto *column = new QVBoxLayout();
+        column->setSpacing(4);
+        auto *captionLabel = new QLabel(caption);
+        captionLabel->setObjectName(QStringLiteral("fieldHintLabel"));
+        column->addWidget(captionLabel);
+        column->addWidget(button);
+        row->addLayout(column, 1);
+    };
+    addSwatch(colorRow, QStringLiteral("标题"), m_titleColorButton);
+    addSwatch(colorRow, QStringLiteral("作者 / 朝代"), m_metadataColorButton);
+    addSwatch(colorRow, QStringLiteral("正文"), m_textColorButton);
+    colorLayout->addLayout(colorRow);
+    displayRoot->addWidget(colorCard);
+
+    auto *layoutCard = new QGroupBox(QStringLiteral("版面"), displayPage);
+    auto *layoutForm = new QFormLayout(layoutCard);
+    layoutForm->addRow(QStringLiteral("文字位置"), m_anchorCombo);
+    layoutForm->addRow(QStringLiteral("图片适配"), m_fitCombo);
     auto *panelRow = new QHBoxLayout();
+    panelRow->setSpacing(8);
     panelRow->addWidget(m_panelCheck);
     panelRow->addWidget(m_panelColorButton);
     panelRow->addStretch();
-    displayForm->addRow(QStringLiteral("文字样式"), panelRow);
-    displayForm->addRow(QString(), m_shadowCheck);
-    displayRoot->addLayout(displayForm);
-    auto *displayHint = new QLabel(QStringLiteral("修改字体、字号、颜色、位置或适配方式后，150–300 ms 内更新左侧预览，不会自动修改桌面。"), displayPage);
+    layoutForm->addRow(QStringLiteral("文字底板"), panelRow);
+    layoutForm->addRow(QString(), m_shadowCheck);
+    displayRoot->addWidget(layoutCard);
+
+    auto *displayHint = new QLabel(QStringLiteral("改动会在约 220 ms 后刷新左侧预览，不会自动修改桌面。"), displayPage);
+    displayHint->setObjectName(QStringLiteral("fieldHintLabel"));
     displayHint->setWordWrap(true);
     displayRoot->addWidget(displayHint);
     auto *resetDisplayButton = new QPushButton(QStringLiteral("恢复默认显示设置"), displayPage);
@@ -367,20 +473,23 @@ void MainWindow::setupUi() {
 
     auto *schedulePage = makeTabPage(m_tabs, QStringLiteral("定时与高级"));
     auto *scheduleRoot = new QVBoxLayout(schedulePage);
+    scheduleRoot->setSpacing(10);
     m_scheduleCheck = new QCheckBox(QStringLiteral("开启定时切换"), schedulePage);
     m_scheduleCheck->setObjectName(QStringLiteral("scheduleCheckBox"));
     m_intervalSpin = new QSpinBox(schedulePage);
     m_intervalSpin->setObjectName(QStringLiteral("intervalSpinBox"));
     m_intervalSpin->setRange(1, 1440);
     m_intervalSpin->setSuffix(QStringLiteral(" 分钟"));
-    auto *scheduleForm = new QFormLayout();
+    auto *scheduleCard = new QGroupBox(QStringLiteral("定时切换"), schedulePage);
+    auto *scheduleForm = new QFormLayout(scheduleCard);
     scheduleForm->addRow(QString(), m_scheduleCheck);
     scheduleForm->addRow(QStringLiteral("切换间隔"), m_intervalSpin);
     m_scheduleNextLabel = new QLabel(schedulePage);
     m_scheduleNextLabel->setObjectName(QStringLiteral("scheduleNextLabel"));
     scheduleForm->addRow(QStringLiteral("下次切换"), m_scheduleNextLabel);
-    scheduleRoot->addLayout(scheduleForm);
+    scheduleRoot->addWidget(scheduleCard);
     auto *scheduleHint = new QLabel(QStringLiteral("程序重启后按启动时间重新计时，不补偿错过的切换。"), schedulePage);
+    scheduleHint->setObjectName(QStringLiteral("fieldHintLabel"));
     scheduleHint->setWordWrap(true);
     scheduleRoot->addWidget(scheduleHint);
     auto *advancedGroup = new QGroupBox(QStringLiteral("高级"), schedulePage);
@@ -1408,8 +1517,10 @@ ImageItem MainWindow::selectedImage(bool *ok) const {
 }
 
 void MainWindow::setTopStatus(const QString &text, const QColor &color) {
-    m_desktopStateLabel->setText(text);
-    m_desktopStateLabel->setStyleSheet(QStringLiteral("padding:4px 10px;border-radius:4px;background:%1;color:white;font-weight:600;").arg(color.name()));
+    m_desktopStateLabel->setText(QStringLiteral("● %1").arg(text));
+    m_desktopStateLabel->setStyleSheet(QStringLiteral(
+        "QLabel { padding: 5px 13px; border-radius: 13px; background: %1;"
+        " color: #ffffff; font-size: 11pt; font-weight: 600; }").arg(color.name()));
 }
 
 void MainWindow::appendLog(const QString &level, const QString &message) {
