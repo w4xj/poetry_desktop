@@ -8,8 +8,15 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-if(NOT CMAKE_PREFIX_PATH AND WIN32 AND EXISTS "E:/codeSoft/QT/6.8.3/mingw_64")
-    set(CMAKE_PREFIX_PATH "E:/codeSoft/QT/6.8.3/mingw_64")
+# Fallbacks for known local Qt installs only. The list is machine-specific by design:
+# pass -DCMAKE_PREFIX_PATH (or set the environment variable) to override it. See README.md.
+if(NOT CMAKE_PREFIX_PATH AND WIN32)
+    foreach(qt_root "S:/soft/QT/6.8.3/mingw_64" "E:/codeSoft/QT/6.8.3/mingw_64")
+        if(EXISTS "${qt_root}/lib/cmake/Qt6/Qt6Config.cmake")
+            set(CMAKE_PREFIX_PATH "${qt_root}")
+            break()
+        endif()
+    endforeach()
 endif()
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Concurrent Test)
