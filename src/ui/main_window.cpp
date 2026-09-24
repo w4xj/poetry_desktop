@@ -1079,22 +1079,37 @@ void MainWindow::randomSwitchWallpaper() {
         updateStatusUi();
         return;
     }
+    // Picking happens here, not in the worker. Drawing from a copy of m_picker
+    // left the original frozen on its seed, so every click replayed the same
+    // number and, combined with the avoid-consecutive rule, alternated between
+    // the same two images forever.
+    const int poemIndex = m_picker.pickPoem(poems);
+    const int imageIndex = m_picker.pickImage(images);
+    if (poemIndex < 0 || imageIndex < 0) {
+        m_statusLabel->setText(QStringLiteral("随机抽取失败"));
+        updateStatusUi();
+        return;
+    }
+    const Poem poem = poems.at(poemIndex);
+    const ImageItem image = images.at(imageIndex);
+    m_picker.rememberPoem(poem.id);
+    m_picker.rememberImage(image.path);
+
     m_desktopBusy = true;
     m_switchStartedGeneration = m_previewGeneration;
     m_statusLabel->setText(QStringLiteral("正在随机生成并设置桌面…"));
     const RenderSettings settings = m_config.render;
     const QSize target = targetWallpaperSize();
     const QString cache = m_store.wallpaperCachePath();
-    const RandomPicker picker = m_picker;
     QStringList protectedPaths;
     for (const QString &path : {m_config.runtime.lastSuccessfulWallpaper,
                                 m_config.runtime.currentPreviewWallpaper,
                                 m_previewPath}) {
         if (!path.isEmpty() && !protectedPaths.contains(path)) protectedPaths.append(path);
     }
-    m_switchWatcher.setFuture(QtConcurrent::run([poems, images, settings, target, cache, picker, protectedPaths] {
+    m_switchWatcher.setFuture(QtConcurrent::run([poem, image, settings, target, cache, protectedPaths] {
         WindowsWallpaperSetter setter;
-        return WallpaperService::run(poems, images, settings, target, cache, picker, setter, protectedPaths);
+        return WallpaperService::renderAndApply(poem, image, settings, target, cache, setter, protectedPaths);
     }));
     updateStatusUi();
 }
@@ -1204,8 +1219,6 @@ void MainWindow::switchFinished() {
     const SwitchResult result = m_switchWatcher.result();
     if (result.success) {
         setPreviewState(result, true);
-        m_picker.rememberPoem(result.poemId);
-        m_picker.rememberImage(result.imagePath);
         m_statusLabel->setText(result.message);
         appendLog(QStringLiteral("INFO"), result.message);
         if (m_switchStartedGeneration != m_previewGeneration) {

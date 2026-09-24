@@ -1,5 +1,46 @@
 # 变更说明
 
+## 2026-09-24 — 随机切换只在两张图之间来回（严重）
+
+**症状**：连点「随机换一张壁纸」，桌面只在这两张之间跳；57 张图片实际只用到 2 张，3 首诗词只用到 2 首。
+
+**根因**：`MainWindow::randomSwitchWallpaper()` 把 picker **拷贝**进工作线程：
+
+```cpp
+const RandomPicker picker = m_picker;
+QtConcurrent::run([..., picker, ...]{ return WallpaperService::run(..., picker, ...); });
+```
+
+`RandomPicker::pickIndex()` 推进的是拷贝内部的 `std::mt19937`，`m_picker` 自身的生成器状态
+永远停在构造种子后的位置。于是每次点击都取出**同一个随机数**；再叠加"避免连续重复"那句
+`if (candidate == lastIndex) candidate = (candidate + 1) % count;`，结果就是 X / Y 无限交替。
+
+**改动**：
+
+- 抽取移到 UI 线程。抽取是 O(n) 的轻量决策，工作线程只承担昂贵的渲染与设置。
+  `WallpaperService` 拆出 `renderAndApply(poem, image, …)`，`run()` 保留并改为「抽取 + 委派」，
+  行为不变，原有测试继续覆盖它。
+- `run()` 的 picker 参数由**按值**改为 **`RandomPicker &`**。这样误用在编译期就不成立：
+  不能再传临时对象，且调用方的状态必然被推进。
+- `m_picker.rememberPoem/rememberImage` 从 `switchFinished` 移到抽取处。失败时也会前进，
+  避免反复撞上同一张已知会失败的图片。
+
+**新增测试**：
+
+- `wallpaperServiceAdvancesTheCallersPicker`：同一个 picker 连调 `run()` 12 次，断言抽到的
+  图片与诗词各超过 2 种。**按值传参时 12 次只会抽到 1 张**（`run()` 内部不调 remember，
+  连交替都不会发生），因此该用例是真正的回归守卫。
+- `randomPickerCoversThePoolAcrossRepeatedDraws`：picker 就地连续抽取必须覆盖足够大的样本池。
+
+**验证**：全新配置构建，无 error / 无 warning；`poetry_tests` 20 项、`poetry_ui_tests` 6 项全过。
+
+> 过程记录：增量构建时 **AUTOMOC 没有重新生成 `test_core.moc`**，导致新测试函数虽然编译进去
+> 了却没注册进 QTest 槽表，跑出来仍是 19 项且毫无报错。删掉构建目录重来才暴露真实数量。
+> 结论：给 Qt 项目加测试用例后，**别信增量构建的用例计数**；CLion 侧建议做一次
+> Tools → CMake → Reset Cache and Reload Project 或完整重新构建。
+
+---
+
 ## 2026-09-24 — 界面布局与视觉重设计
 
 只动 UI 与布局，**功能、信号连接、控件 objectName、交互语义全部保持不变**。

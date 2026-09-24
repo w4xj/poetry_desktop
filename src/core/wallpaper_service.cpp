@@ -81,7 +81,7 @@ SwitchResult WallpaperService::run(const QVector<Poem> &poems,
                                    const RenderSettings &settings,
                                    const QSize &targetSize,
                                    const QString &cacheDirectory,
-                                   RandomPicker picker,
+                                   RandomPicker &picker,
                                    IWallpaperSetter &setter,
                                    const QStringList &protectedPaths) {
     SwitchResult result;
@@ -110,7 +110,18 @@ SwitchResult WallpaperService::run(const QVector<Poem> &poems,
         return result;
     }
 
-    result = renderPreview(availablePoems.at(poemIndex), availableImages.at(imageIndex), settings, targetSize, cacheDirectory);
+    return renderAndApply(availablePoems.at(poemIndex), availableImages.at(imageIndex), settings,
+                          targetSize, cacheDirectory, setter, protectedPaths);
+}
+
+SwitchResult WallpaperService::renderAndApply(const Poem &poem,
+                                              const ImageItem &image,
+                                              const RenderSettings &settings,
+                                              const QSize &targetSize,
+                                              const QString &cacheDirectory,
+                                              IWallpaperSetter &setter,
+                                              const QStringList &protectedPaths) {
+    SwitchResult result = renderPreview(poem, image, settings, targetSize, cacheDirectory);
     if (!result.success) return result;
 
     QString setError;
@@ -129,8 +140,8 @@ SwitchResult WallpaperService::run(const QVector<Poem> &poems,
 
     result.success = true;
     result.message = QStringLiteral("已应用到桌面：%1 / %2")
-        .arg(result.poem.title.isEmpty() ? result.poem.content.left(12) : result.poem.title,
-             QFileInfo(result.image.path).fileName());
+        .arg(poem.title.isEmpty() ? poem.content.left(12) : poem.title,
+             QFileInfo(image.path).fileName());
     return result;
 }
 

@@ -31,6 +31,7 @@ private slots:
     void poemImportAndValidation();
     void invalidImportDoesNotChangeLibrary();
     void randomPickerAvoidsConsecutive();
+    void randomPickerCoversThePoolAcrossRepeatedDraws();
     void rendererCreatesTargetWithText();
     void fontSettingChangesRenderedOutput();
     void rendererUsesLayeredSectionColors();
@@ -42,6 +43,7 @@ private slots:
     void imageScanReportsUnavailableFormatsInsteadOfSilentlySkipping();
     void configRoundTripAndCorruptionRecovery();
     void wallpaperServiceKeepsFailureSafe();
+    void wallpaperServiceAdvancesTheCallersPicker();
     void cacheCleanupPreservesCurrent();
     void cacheCleanupProtectsActiveWallpaperAcrossPreviews();
 };
@@ -93,6 +95,33 @@ void CoreTests::randomPickerAvoidsConsecutive() {
     picker.rememberPoem(poems.at(second).id);
     const int third = picker.pickPoem(poems);
     QVERIFY(second != third);
+}
+
+void CoreTests::randomPickerCoversThePoolAcrossRepeatedDraws() {
+    QVector<ImageItem> images;
+    for (int i = 0; i < 20; ++i) {
+        images.append(ImageItem{QStringLiteral("p%1.png").arg(i), 1, QDateTime(), true, QString()});
+    }
+    QVector<Poem> poems;
+    for (int i = 0; i < 10; ++i) {
+        poems.append(Poem{QStringLiteral("poem-%1").arg(i), {}, {}, {}, QStringLiteral("body"), {}, true});
+    }
+
+    RandomPicker picker(4242);
+    QSet<QString> drawnImages;
+    QSet<QString> drawnPoems;
+    for (int i = 0; i < 40; ++i) {
+        const int imageIndex = picker.pickImage(images);
+        const int poemIndex = picker.pickPoem(poems);
+        QVERIFY(imageIndex >= 0 && poemIndex >= 0);
+        drawnImages.insert(images.at(imageIndex).path);
+        drawnPoems.insert(poems.at(poemIndex).id);
+        picker.rememberImage(images.at(imageIndex).path);
+        picker.rememberPoem(poems.at(poemIndex).id);
+    }
+
+    QVERIFY2(drawnImages.size() > 8, qPrintable(QStringLiteral("only %1 of 20 images were ever drawn").arg(drawnImages.size())));
+    QVERIFY2(drawnPoems.size() > 5, qPrintable(QStringLiteral("only %1 of 10 poems were ever drawn").arg(drawnPoems.size())));
 }
 
 void CoreTests::rendererCreatesTargetWithText() {
@@ -383,16 +412,55 @@ void CoreTests::wallpaperServiceKeepsFailureSafe() {
     QVector<ImageItem> images{ImageItem{sourcePath, QFileInfo(sourcePath).size(), QFileInfo(sourcePath).lastModified(), true, {}}};
     const QVector<Poem> poems = PoetryLibrary::defaultPoems().mid(0, 1);
     FakeWallpaperSetter setter;
-    const SwitchResult success = WallpaperService::run(poems, images, RenderSettings{}, QSize(640, 480), temp.path(), RandomPicker(1), setter);
+    RandomPicker picker(1);
+    const SwitchResult success = WallpaperService::run(poems, images, RenderSettings{}, QSize(640, 480), temp.path(), picker, setter);
     QVERIFY2(success.success, qPrintable(success.message));
     QVERIFY(QFileInfo::exists(success.outputPath));
     QCOMPARE(setter.path, success.outputPath);
 
     FakeWallpaperSetter failedSetter;
     failedSetter.success = false;
-    const SwitchResult failure = WallpaperService::run(poems, images, RenderSettings{}, QSize(640, 480), temp.path(), RandomPicker(1), failedSetter);
+    const SwitchResult failure = WallpaperService::run(poems, images, RenderSettings{}, QSize(640, 480), temp.path(), picker, failedSetter);
     QVERIFY(!failure.success);
     QVERIFY(failure.message.contains(QStringLiteral("fake failure")));
+}
+
+// Regression guard: the picker used to be taken by value, so a worker thread
+// advanced a copy and the caller stayed frozen on its seed. Combined with the
+// avoid-consecutive rule that made the app alternate between two images forever.
+void CoreTests::wallpaperServiceAdvancesTheCallersPicker() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QVector<ImageItem> images;
+    QVector<Poem> poems;
+    for (int i = 0; i < 4; ++i) {
+        const QString path = QDir(temp.path()).filePath(QStringLiteral("src%1.png").arg(i));
+        QImage image(QSize(60, 40), QImage::Format_RGB32);
+        image.fill(QColor(30 + 50 * i, 90, 150));
+        QVERIFY(image.save(path, "PNG"));
+        images.append(ImageItem{path, QFileInfo(path).size(), QFileInfo(path).lastModified(), true, QString()});
+        poems.append(Poem{QStringLiteral("p%1").arg(i), QStringLiteral("标题%1").arg(i), {}, {},
+                          QStringLiteral("正文%1").arg(i), {}, true});
+    }
+
+    FakeWallpaperSetter setter;
+    RandomPicker picker(20260924);
+    QSet<QString> usedImages;
+    QSet<QString> usedPoems;
+    for (int i = 0; i < 12; ++i) {
+        const SwitchResult result = WallpaperService::run(poems, images, RenderSettings{},
+                                                          QSize(160, 120), temp.path(), picker, setter);
+        QVERIFY2(result.success, qPrintable(result.message));
+        usedImages.insert(QFileInfo(result.imagePath).fileName());
+        usedPoems.insert(result.poemId);
+    }
+
+    QVERIFY2(usedImages.size() > 2,
+             qPrintable(QStringLiteral("run() drew from a frozen picker: %1 distinct images over 12 calls")
+                 .arg(usedImages.size())));
+    QVERIFY2(usedPoems.size() > 2,
+             qPrintable(QStringLiteral("run() drew from a frozen picker: %1 distinct poems over 12 calls")
+                 .arg(usedPoems.size())));
 }
 
 void CoreTests::cacheCleanupPreservesCurrent() {
