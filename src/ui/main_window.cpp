@@ -237,8 +237,6 @@ void MainWindow::setupUi() {
     m_imageDirectories = new QListWidget(directoryGroup);
     m_imageDirectories->setObjectName(QStringLiteral("imageDirectoryList"));
     m_imageDirectories->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_imageDirectories->setTextElideMode(Qt::ElideMiddle);
-    m_imageDirectories->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     directoryLayout->addWidget(m_imageDirectories);
     auto *fileGroup = new QGroupBox(QStringLiteral("可用图片（可直接选择）"), imageSplitter);
     auto *fileLayout = new QVBoxLayout(fileGroup);
