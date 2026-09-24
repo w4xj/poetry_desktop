@@ -118,9 +118,36 @@ QVector<ImageItem> ImageLibrary::validItems() const {
 ImageLibrary::ScanResult ImageLibrary::scan(const QVector<ImageSource> &sources) {
     ScanResult result;
     QSet<QString> seen;
+    QSet<QString> reportedMissingPlugins;
     QSet<QString> formats;
     for (const QByteArray &format : QImageReader::supportedImageFormats()) formats.insert(QString::fromLatin1(format).toLower());
     const QSet<QString> required = {QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("bmp"), QStringLiteral("webp")};
+
+    // Header-only validation: a full read() here decoded every candidate image
+    // just to prove it was readable, which stalled scans of large photo folders.
+    const auto acceptImage = [&](const QFileInfo &info) {
+        const QString suffix = info.suffix().toLower();
+        if (!required.contains(suffix)) return;
+        const QString path = QDir::cleanPath(info.absoluteFilePath());
+        if (seen.contains(path)) return;
+        seen.insert(path);
+        if (!formats.contains(suffix)) {
+            ++result.skipped;
+            if (!reportedMissingPlugins.contains(suffix)) {
+                reportedMissingPlugins.insert(suffix);
+                result.errors.append(QStringLiteral("Qt 缺少 %1 解码插件，该类型文件已全部跳过").arg(suffix.toUpper()));
+            }
+            return;
+        }
+        QImageReader reader(path);
+        reader.setAutoTransform(true);
+        if (!reader.canRead() || !reader.size().isValid()) {
+            ++result.skipped;
+            result.errors.append(QStringLiteral("无法读取图片：%1").arg(path));
+            return;
+        }
+        result.items.append(ImageItem{path, info.size(), info.lastModified(), true, QString()});
+    };
 
     for (const ImageSource &source : sources) {
         if (!source.enabled) continue;
@@ -128,52 +155,20 @@ ImageLibrary::ScanResult ImageLibrary::scan(const QVector<ImageSource> &sources)
         if (source.isFile) {
             if (!sourceInfo.exists() || !sourceInfo.isFile() || !sourceInfo.isReadable()) {
                 ++result.skipped;
-                result.errors.append(QStringLiteral("\u56fe\u7247\u6587\u4ef6\u4e0d\u53ef\u7528\uff1a%1").arg(source.path));
+                result.errors.append(QStringLiteral("图片文件不可用：%1").arg(source.path));
                 continue;
             }
-            const QString path = QDir::cleanPath(sourceInfo.absoluteFilePath());
-            const QString suffix = sourceInfo.suffix().toLower();
-            if (!required.contains(suffix) || !formats.contains(suffix) || seen.contains(path)) continue;
-            seen.insert(path);
-            QImageReader reader(path);
-            reader.setAutoTransform(true);
-            if (!reader.canRead() || reader.read().isNull()) {
-                ++result.skipped;
-                result.errors.append(QStringLiteral("\u56fe\u7247\u89e3\u7801\u5931\u8d25\uff1a%1").arg(path));
-                continue;
-            }
-            result.items.append(ImageItem{path, sourceInfo.size(), sourceInfo.lastModified(), true, QString()});
+            acceptImage(sourceInfo);
             continue;
         }
         if (!sourceInfo.exists() || !sourceInfo.isDir() || !sourceInfo.isReadable()) {
             ++result.skipped;
-            result.errors.append(QStringLiteral("\u56fe\u7247\u6587\u4ef6\u4e0d\u53ef\u7528\uff1a%1").arg(source.path));
+            result.errors.append(QStringLiteral("图片目录不可用：%1").arg(source.path));
             continue;
         }
         QDirIterator iterator(sourceInfo.absoluteFilePath(), QStringList(), QDir::Files | QDir::NoSymLinks,
                               source.recursive ? QDirIterator::Subdirectories : QDirIterator::NoIteratorFlags);
-        while (iterator.hasNext()) {
-            const QString path = QDir::cleanPath(QFileInfo(iterator.next()).absoluteFilePath());
-            const QFileInfo info(path);
-            const QString suffix = info.suffix().toLower();
-            if (!required.contains(suffix) || !formats.contains(suffix)) continue;
-            if (seen.contains(path)) continue;
-            seen.insert(path);
-            QImageReader reader(path);
-            reader.setAutoTransform(true);
-            if (!reader.canRead()) {
-                ++result.skipped;
-                result.errors.append(QStringLiteral("无法读取图片：%1").arg(path));
-                continue;
-            }
-            const QImage image = reader.read();
-            if (image.isNull()) {
-                ++result.skipped;
-                result.errors.append(QStringLiteral("图片解码失败：%1").arg(path));
-                continue;
-            }
-            result.items.append(ImageItem{path, info.size(), info.lastModified(), true, QString()});
-        }
+        while (iterator.hasNext()) acceptImage(QFileInfo(iterator.next()));
     }
     return result;
 }

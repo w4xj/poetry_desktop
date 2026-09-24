@@ -80,7 +80,6 @@ struct RuntimeState {
     QString lastPoemId;
     QString lastImagePath;
     QDateTime lastSuccessTime;
-    QString lastMessage;
     QString currentPreviewWallpaper;
     QString currentPreviewPoemId;
     QString currentPreviewImagePath;

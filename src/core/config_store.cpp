@@ -104,7 +104,6 @@ QJsonObject runtimeToJson(const RuntimeState &runtime) {
         {QStringLiteral("lastPoemId"), runtime.lastPoemId},
         {QStringLiteral("lastImagePath"), runtime.lastImagePath},
         {QStringLiteral("lastSuccessTime"), runtime.lastSuccessTime.toString(Qt::ISODate)},
-        {QStringLiteral("lastMessage"), runtime.lastMessage},
         {QStringLiteral("currentPreviewWallpaper"), runtime.currentPreviewWallpaper},
         {QStringLiteral("currentPreviewPoemId"), runtime.currentPreviewPoemId},
         {QStringLiteral("currentPreviewImagePath"), runtime.currentPreviewImagePath},
@@ -121,8 +120,6 @@ void runtimeFromJson(const QJsonObject &object, RuntimeState &runtime) {
         runtime.lastImagePath = object.value(QStringLiteral("lastImagePath")).toString();
     if (object.value(QStringLiteral("lastSuccessTime")).isString())
         runtime.lastSuccessTime = QDateTime::fromString(object.value(QStringLiteral("lastSuccessTime")).toString(), Qt::ISODate);
-    if (object.value(QStringLiteral("lastMessage")).isString())
-        runtime.lastMessage = object.value(QStringLiteral("lastMessage")).toString();
     if (object.value(QStringLiteral("currentPreviewWallpaper")).isString())
         runtime.currentPreviewWallpaper = object.value(QStringLiteral("currentPreviewWallpaper")).toString();
     if (object.value(QStringLiteral("currentPreviewPoemId")).isString())

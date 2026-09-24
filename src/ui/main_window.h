@@ -6,6 +6,7 @@
 
 #include <QFutureWatcher>
 #include <QMainWindow>
+#include <QPixmap>
 
 class QLabel;
 class QListWidget;
@@ -37,7 +38,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
-    void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
     void addImageDirectory();
@@ -94,6 +95,7 @@ private:
     void updateSettingsUi();
     void updateStatusUi();
     void updatePreview(const QString &path);
+    void rescalePreview();
     void updatePreviewSummary();
     void updateScheduleTimer();
     void startImageScan();
@@ -129,12 +131,14 @@ private:
     bool m_ignoreImageChanges = false;
     bool m_hasPreviewContent = false;
     bool m_previewApplied = false;
+    bool m_rescalingPreview = false;
     ApplyKind m_applyKind = ApplyKind::Preview;
     quint64 m_previewGeneration = 0;
     quint64 m_previewStartedGeneration = 0;
     quint64 m_switchStartedGeneration = 0;
 
     QString m_previewPath;
+    QPixmap m_previewPixmap;
     QString m_selectedImagePath;
     Poem m_previewPoem;
     ImageItem m_previewImage;

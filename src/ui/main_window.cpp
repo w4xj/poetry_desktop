@@ -7,12 +7,14 @@
 #include <QAbstractItemView>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QEvent>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -28,7 +30,6 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QResizeEvent>
 #include <QScreen>
 #include <QSignalBlocker>
 #include <QSizePolicy>
@@ -121,7 +122,7 @@ void MainWindow::setupUi() {
     m_scheduleSummaryLabel->setObjectName(QStringLiteral("scheduleSummaryLabel"));
     auto *moreButton = new QToolButton(central);
     moreButton->setObjectName(QStringLiteral("moreMenuButton"));
-    moreButton->setText(QStringLiteral("更多 ▾"));
+    moreButton->setText(QStringLiteral("更多"));
     moreButton->setPopupMode(QToolButton::InstantPopup);
     auto *moreMenu = new QMenu(moreButton);
     auto *openCacheAction = moreMenu->addAction(QStringLiteral("打开缓存目录"));
@@ -157,6 +158,7 @@ void MainWindow::setupUi() {
     m_previewLabel->setMinimumSize(640, 400);
     m_previewLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_previewLabel->setStyleSheet(QStringLiteral("background:#202020;color:#bdbdbd;border:1px solid #505050;"));
+    m_previewLabel->installEventFilter(this);
     previewLayout->addWidget(m_previewLabel, 1);
     m_previewHintLabel = new QLabel(QStringLiteral("修改显示设置后会实时更新预览，不会自动修改桌面。"), previewGroup);
     m_previewHintLabel->setObjectName(QStringLiteral("previewHintLabel"));
@@ -235,12 +237,16 @@ void MainWindow::setupUi() {
     m_imageDirectories = new QListWidget(directoryGroup);
     m_imageDirectories->setObjectName(QStringLiteral("imageDirectoryList"));
     m_imageDirectories->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_imageDirectories->setTextElideMode(Qt::ElideMiddle);
+    m_imageDirectories->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     directoryLayout->addWidget(m_imageDirectories);
     auto *fileGroup = new QGroupBox(QStringLiteral("可用图片（可直接选择）"), imageSplitter);
     auto *fileLayout = new QVBoxLayout(fileGroup);
     m_imageFiles = new QListWidget(fileGroup);
     m_imageFiles->setObjectName(QStringLiteral("imageFileList"));
     m_imageFiles->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_imageFiles->setTextElideMode(Qt::ElideMiddle);
+    m_imageFiles->setMinimumHeight(140);
     fileLayout->addWidget(m_imageFiles);
     imageSplitter->addWidget(directoryGroup);
     imageSplitter->addWidget(fileGroup);
@@ -249,13 +255,14 @@ void MainWindow::setupUi() {
     imageRoot->addWidget(imageSplitter, 1);
     m_selectedImageInfoLabel = new QLabel(QStringLiteral("请选择一张图片"), imagePage);
     m_selectedImageInfoLabel->setObjectName(QStringLiteral("selectedImageInfoLabel"));
-    m_selectedImageInfoLabel->setWordWrap(true);
     imageRoot->addWidget(m_selectedImageInfoLabel);
     auto *imageActionRow = new QHBoxLayout();
     m_useSelectedImagePreviewButton = new QPushButton(QStringLiteral("使用选中图片预览"), imagePage);
     m_useSelectedImagePreviewButton->setObjectName(QStringLiteral("useSelectedImagePreviewButton"));
+    m_useSelectedImagePreviewButton->setToolTip(QStringLiteral("只更新左侧预览，不会修改桌面。"));
     m_setSelectedImageButton = new QPushButton(QStringLiteral("将选中图片设为壁纸"), imagePage);
     m_setSelectedImageButton->setObjectName(QStringLiteral("setSelectedImageButton"));
+    m_setSelectedImageButton->setToolTip(QStringLiteral("直接把这张原图设为桌面壁纸，不叠加诗词。"));
     imageActionRow->addWidget(m_useSelectedImagePreviewButton);
     imageActionRow->addWidget(m_setSelectedImageButton);
     imageActionRow->addStretch();
@@ -535,8 +542,8 @@ void MainWindow::updateImageUi() {
     m_imageDirectories->clear();
     for (const ImageSource &source : m_config.imageSources) {
         const QString label = source.isFile
-            ? QStringLiteral("?? ? %1").arg(QFileInfo(source.path).fileName())
-            : QStringLiteral("?? ? %1").arg(source.path);
+            ? QStringLiteral("图片  %1").arg(QFileInfo(source.path).fileName())
+            : QStringLiteral("目录  %1").arg(source.path);
         auto *item = new QListWidgetItem(label, m_imageDirectories);
         item->setToolTip(source.path);
         item->setData(Qt::UserRole, source.path);
@@ -664,15 +671,25 @@ void MainWindow::updateStatusUi() {
 
 void MainWindow::updatePreview(const QString &path) {
     if (path.isEmpty() || !QFileInfo::exists(path)) {
+        m_previewPixmap = QPixmap();
         m_previewLabel->setPixmap(QPixmap());
         m_previewLabel->setText(QStringLiteral("还没有可用预览\n请先添加图片目录并导入诗词库"));
         return;
     }
     const QPixmap pixmap(path);
     if (pixmap.isNull()) return;
+    m_previewPixmap = pixmap;
     m_previewLabel->setText(QString());
-    m_previewLabel->setPixmap(pixmap.scaled(m_previewLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     m_previewLabel->setToolTip(path);
+    rescalePreview();
+}
+
+// Scaled from the cached full-size image, never re-decoded per frame.
+void MainWindow::rescalePreview() {
+    if (m_rescalingPreview || m_previewPixmap.isNull()) return;
+    m_rescalingPreview = true;
+    m_previewLabel->setPixmap(m_previewPixmap.scaled(m_previewLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    m_rescalingPreview = false;
 }
 
 void MainWindow::updatePreviewSummary() {
@@ -796,7 +813,7 @@ void MainWindow::updateSelectedImageInfo() {
     const QFileInfo info(image.path);
     QImageReader reader(image.path);
     const QSize size = reader.size();
-    m_selectedImageInfoLabel->setText(QStringLiteral("当前选中图片：%1\n%2 × %3 · %4 KB\n使用选中图片预览不会自动修改桌面；设置原图会直接修改桌面。")
+    m_selectedImageInfoLabel->setText(QStringLiteral("当前选中：%1 · %2 × %3 · %4 KB")
         .arg(info.fileName()).arg(size.width()).arg(size.height()).arg(info.size() / 1024));
     m_selectedImageInfoLabel->setToolTip(image.path);
 }
@@ -1323,19 +1340,22 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     event->accept();
 }
 
-void MainWindow::resizeEvent(QResizeEvent *event) {
-    QMainWindow::resizeEvent(event);
-    if (!m_previewPath.isEmpty()) updatePreview(m_previewPath);
+// The layout sizes the label after the window's own resize event, and splitter
+// drags never resize the window at all, so scaling follows the label instead.
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == m_previewLabel && event->type() == QEvent::Resize) rescalePreview();
+    return QMainWindow::eventFilter(watched, event);
 }
 
 QSize MainWindow::targetWallpaperSize() const {
     QScreen *screen = QGuiApplication::primaryScreen();
-    if (!screen) return QSize(1920, 1080);
-    QRect workArea = screen->availableGeometry();
-    if (!workArea.isValid()) workArea = screen->geometry();
-    if (!workArea.isValid()) return QSize(1920, 1080);
+    if (!screen || !screen->geometry().isValid()) return QSize(1920, 1080);
+    // The full screen, not availableGeometry: the latter excludes the taskbar, so
+    // composing to it produced e.g. 3840x2100 for a 3840x2160 panel and Windows
+    // then cropped or letterboxed the result.
+    const QRect geometry = screen->geometry();
     const qreal dpr = qMax<qreal>(1.0, screen->devicePixelRatio());
-    return QSize(qMax(1, qRound(workArea.width() * dpr)), qMax(1, qRound(workArea.height() * dpr)));
+    return QSize(qMax(1, qRound(geometry.width() * dpr)), qMax(1, qRound(geometry.height() * dpr)));
 }
 
 QString MainWindow::colorButtonStyle(const QColor &color) const {

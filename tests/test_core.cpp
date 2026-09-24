@@ -7,6 +7,8 @@
 #include <QFile>
 #include <QGuiApplication>
 #include <QImage>
+#include <QImageReader>
+#include <QSet>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -37,6 +39,7 @@ private slots:
     void rendererFallsBackForUnavailableChineseFont();
     void oversizedPoemReturnsError();
     void imageScanRecursesAndDeduplicates();
+    void imageScanReportsUnavailableFormatsInsteadOfSilentlySkipping();
     void configRoundTripAndCorruptionRecovery();
     void wallpaperServiceKeepsFailureSafe();
     void cacheCleanupPreservesCurrent();
@@ -266,6 +269,43 @@ void CoreTests::imageScanRecursesAndDeduplicates() {
     const auto result = ImageLibrary::scan({ImageSource{temp.path(), true, true}, ImageSource{temp.path(), true, true}});
     QCOMPARE(result.items.size(), 2);
     QVERIFY(result.skipped >= 1);
+}
+
+void CoreTests::imageScanReportsUnavailableFormatsInsteadOfSilentlySkipping() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QImage image(QSize(20, 20), QImage::Format_RGB32);
+    image.fill(Qt::red);
+    QVERIFY(image.save(QDir(temp.path()).filePath(QStringLiteral("ok.png")), "PNG"));
+
+    QFile text(QDir(temp.path()).filePath(QStringLiteral("notes.txt")));
+    QVERIFY(text.open(QIODevice::WriteOnly));
+    text.write("not an image");
+    text.close();
+
+    const QString webpPath = QDir(temp.path()).filePath(QStringLiteral("shot.webp"));
+    QFile webp(webpPath);
+    QVERIFY(webp.open(QIODevice::WriteOnly));
+    webp.write("RIFF\0\0\0\0WEBPVP8 ", 16);
+    webp.close();
+
+    const auto result = ImageLibrary::scan({ImageSource{temp.path(), true, true}});
+
+    QCOMPARE(result.items.size(), 1);
+    QCOMPARE(QFileInfo(result.items.first().path).fileName(), QStringLiteral("ok.png"));
+
+    QSet<QString> formats;
+    for (const QByteArray &format : QImageReader::supportedImageFormats())
+        formats.insert(QString::fromLatin1(format).toLower());
+
+    // A non-image extension must never inflate the skip counter, so WEBP is the
+    // only candidate that can account for it.
+    QVERIFY(result.skipped <= 1);
+    if (!formats.contains(QStringLiteral("webp"))) {
+        QCOMPARE(result.skipped, 1);
+        QVERIFY2(result.errors.join(QStringLiteral("；")).contains(QStringLiteral("WEBP")),
+                 "a claimed format with no decoder plugin vanished without any report");
+    }
 }
 
 void CoreTests::configRoundTripAndCorruptionRecovery() {

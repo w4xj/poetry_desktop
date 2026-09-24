@@ -129,7 +129,8 @@ SwitchResult WallpaperService::run(const QVector<Poem> &poems,
 
     result.success = true;
     result.message = QStringLiteral("已应用到桌面：%1 / %2")
-        .arg(result.poem.title.isEmpty() ? result.poem.content.left(12) : result.poem.title, result.image.path);
+        .arg(result.poem.title.isEmpty() ? result.poem.content.left(12) : result.poem.title,
+             QFileInfo(result.image.path).fileName());
     return result;
 }
 

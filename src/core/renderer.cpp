@@ -64,6 +64,7 @@ struct TypographyLayout {
     WrappedText title;
     WrappedText author;
     WrappedText dynasty;
+    WrappedText separator;
     WrappedText content;
     bool metadataInline = false;
     int metadataWidth = 0;
@@ -111,10 +112,20 @@ TypographyLayout buildLayout(const Poem &poem, const RenderSettings &settings,
 
     const bool hasAuthor = !layout.author.isEmpty();
     const bool hasDynasty = !layout.dynasty.isEmpty();
+    WrappedText mark;
+    if (hasAuthor && hasDynasty) {
+        QFont markFont(family);
+        markFont.setPointSize(dynastySize);
+        markFont.setWeight(QFont::Normal);
+        markFont.setStyleStrategy(QFont::PreferAntialias);
+        mark = makeWrapped(QStringLiteral("·"), markFont, settings.metadataColor, maxWidth, 1.10);
+    }
     if (hasAuthor && hasDynasty && layout.author.lines.size() == 1 && layout.dynasty.lines.size() == 1
-        && layout.author.width + settings.metadataInlineSpacing + layout.dynasty.width <= maxWidth) {
+        && layout.author.width + mark.width + 2 * settings.metadataInlineSpacing + layout.dynasty.width <= maxWidth) {
         layout.metadataInline = true;
-        layout.metadataWidth = layout.author.width + settings.metadataInlineSpacing + layout.dynasty.width;
+        layout.separator = mark;
+        layout.metadataWidth = layout.author.width + settings.metadataInlineSpacing + mark.width
+            + settings.metadataInlineSpacing + layout.dynasty.width;
         layout.metadataHeight = qMax(layout.author.height, layout.dynasty.height);
     } else if (hasAuthor || hasDynasty) {
         layout.metadataWidth = qMax(hasAuthor ? layout.author.width : 0, hasDynasty ? layout.dynasty.width : 0);
@@ -291,10 +302,11 @@ QImage WallpaperRenderer::render(const QImage &source, const Poem &poem, const R
 
     if (layout.metadataHeight > 0) {
         if (layout.metadataInline) {
+            const int markX = positioned.left() + layout.author.width + effective.metadataInlineSpacing;
             drawWrapped(painter, layout.author, positioned.left(), y, effective.shadowEnabled);
-            drawWrapped(painter, layout.dynasty,
-                        positioned.left() + layout.author.width + effective.metadataInlineSpacing,
-                        y, settings.shadowEnabled);
+            drawWrapped(painter, layout.separator, markX, y, effective.shadowEnabled);
+            drawWrapped(painter, layout.dynasty, markX + layout.separator.width + effective.metadataInlineSpacing,
+                        y, effective.shadowEnabled);
         } else {
             if (!layout.author.isEmpty()) {
                 drawWrapped(painter, layout.author, positioned.left(), y, effective.shadowEnabled);
