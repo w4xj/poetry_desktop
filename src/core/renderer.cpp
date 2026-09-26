@@ -202,7 +202,10 @@ QImage WallpaperRenderer::prepareBackground(const QImage &source, const RenderSe
     canvas.fill(settings.canvasBackgroundColor);
     if (source.isNull() || !targetSize.isValid()) return canvas;
 
-    QImage image = source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    // No convertToFormat here: QImage::scaled() already produces the format it
+    // needs, so converting first allocated a second full-size copy of the source
+    // (33 MB on a 4K panel) purely to be discarded one line later.
+    QImage image = source;
     if (settings.fitMode == FitMode::Stretch) {
         image = image.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         QPainter painter(&canvas);

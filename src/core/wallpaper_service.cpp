@@ -60,8 +60,11 @@ SwitchResult WallpaperService::renderPreview(const Poem &poem,
         return result;
     }
 
-    QImage verify;
-    if (!verify.load(outputPath) || verify.size() != targetSize) {
+    // Header-only validation. Decoding the finished PNG just to compare its
+    // dimensions allocated another full-size image on every render; QSaveFile's
+    // commit() already guarantees the file was written completely.
+    QImageReader written(outputPath);
+    if (!written.canRead() || written.size() != targetSize || QFileInfo(outputPath).size() <= 0) {
         result.message = QStringLiteral("壁纸文件校验失败");
         return result;
     }

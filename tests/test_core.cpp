@@ -14,6 +14,34 @@
 
 using namespace poetry;
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <psapi.h>
+
+static qint64 workingSetKB() {
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    counters.cb = sizeof(counters);
+    if (!K32GetProcessMemoryInfo(GetCurrentProcess(),
+                                 reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&counters), sizeof(counters))) {
+        return -1;
+    }
+    return static_cast<qint64>(counters.WorkingSetSize) / 1024;
+}
+
+static qint64 peakWorkingSetKB() {
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    counters.cb = sizeof(counters);
+    if (!K32GetProcessMemoryInfo(GetCurrentProcess(),
+                                 reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&counters), sizeof(counters))) {
+        return -1;
+    }
+    return static_cast<qint64>(counters.PeakWorkingSetSize) / 1024;
+}
+#else
+static qint64 workingSetKB() { return -1; }
+static qint64 peakWorkingSetKB() { return -1; }
+#endif
+
 class FakeWallpaperSetter final : public IWallpaperSetter {
 public:
     bool success = true;
@@ -47,6 +75,7 @@ private slots:
     void wallpaperServiceAdvancesTheCallersPicker();
     void cacheCleanupPreservesCurrent();
     void cacheCleanupProtectsActiveWallpaperAcrossPreviews();
+    void renderingRepeatedlyDoesNotGrowUnbounded();
 };
 
 void CoreTests::poemImportAndValidation() {
@@ -540,6 +569,45 @@ void CoreTests::cacheCleanupProtectsActiveWallpaperAcrossPreviews() {
     QVERIFY2(QFileInfo::exists(active.outputPath), "active desktop wallpaper was deleted by preview cleanup");
     QVERIFY(QFileInfo::exists(latest.outputPath));
 }
+// PRODUCT_SPEC requires surviving 100 consecutive switches without leaking.
+// Samples the working set across repeated renders so steady-state caching can be
+// told apart from unbounded growth.
+void CoreTests::renderingRepeatedlyDoesNotGrowUnbounded() {
+    if (workingSetKB() < 0) QSKIP("working set is only measured on Windows");
+
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QVector<ImageItem> images;
+    for (int i = 0; i < 3; ++i) {
+        const QString path = QDir(temp.path()).filePath(QStringLiteral("src%1.png").arg(i));
+        QImage image(QSize(1200, 800), QImage::Format_RGB32);
+        image.fill(QColor(30 + 40 * i, 80, 140));
+        QVERIFY(image.save(path, "PNG"));
+        images.append(ImageItem{path, QFileInfo(path).size(), QFileInfo(path).lastModified(), true, QString()});
+    }
+    const QVector<Poem> poems = PoetryLibrary::defaultPoems();
+    QVERIFY(!poems.isEmpty());
+
+    QVector<qint64> samples;
+    for (int i = 1; i <= 40; ++i) {
+        const SwitchResult result = WallpaperService::renderPreview(
+            poems.at(i % poems.size()), images.at(i % images.size()), RenderSettings{},
+            QSize(3840, 2160), temp.path());
+        QVERIFY2(result.success, qPrintable(result.message));
+        if (i % 10 == 0) samples.append(workingSetKB());
+    }
+
+    QStringList readable;
+    for (const qint64 kb : samples) readable << QString::number(kb / 1024);
+    qInfo().noquote() << "4K renders, working set MB after 10..40:" << readable.join(QStringLiteral(", "))
+                      << "| peak working set MB:" << peakWorkingSetKB() / 1024;
+
+    const qint64 growthKB = samples.last() - samples.at(1);   // render 40 vs render 20
+    QVERIFY2(growthKB < 60 * 1024,
+             qPrintable(QStringLiteral("working set grew %1 MB between render 20 and 60")
+                 .arg(growthKB / 1024)));
+}
+
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     CoreTests tests;
