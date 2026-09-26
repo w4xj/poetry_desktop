@@ -79,7 +79,7 @@ QString imageFilter() { return QStringLiteral("图片 (*.png *.jpg *.jpeg *.bmp 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_picker(static_cast<quint32>(QDateTime::currentMSecsSinceEpoch() & 0xffffffffu)) {
     setWindowTitle(QStringLiteral("诗词壁纸"));
-    setMinimumSize(980, 680);
+    setMinimumSize(900, 640);
     resize(1440, 900);
     setupUi();
     setupTray();
@@ -413,6 +413,8 @@ void MainWindow::setupUi() {
     m_titleColorButton->setObjectName(QStringLiteral("titleColorButton"));
     m_metadataColorButton = new QPushButton(displayPage);
     m_metadataColorButton->setObjectName(QStringLiteral("metadataColorButton"));
+    m_dynastyColorButton = new QPushButton(displayPage);
+    m_dynastyColorButton->setObjectName(QStringLiteral("dynastyColorButton"));
     m_anchorCombo = new QComboBox(displayPage);
     m_anchorCombo->setObjectName(QStringLiteral("anchorComboBox"));
     m_anchorCombo->addItem(QStringLiteral("左上"), QStringLiteral("topLeft"));
@@ -439,22 +441,22 @@ void MainWindow::setupUi() {
     displayRoot->addWidget(typeCard);
 
     auto *colorCard = new QGroupBox(QStringLiteral("颜色"), displayPage);
-    auto *colorLayout = new QVBoxLayout(colorCard);
-    auto *colorRow = new QHBoxLayout();
-    colorRow->setSpacing(8);
-    const auto addSwatch = [](QHBoxLayout *row, const QString &caption, QPushButton *button) {
-        auto *column = new QVBoxLayout();
-        column->setSpacing(4);
+    auto *colorGrid = new QGridLayout(colorCard);
+    colorGrid->setHorizontalSpacing(8);
+    colorGrid->setVerticalSpacing(6);
+    const auto addSwatch = [](QGridLayout *grid, int row, int column, const QString &caption, QPushButton *button) {
+        auto *cell = new QVBoxLayout();
+        cell->setSpacing(2);
         auto *captionLabel = new QLabel(caption);
         captionLabel->setObjectName(QStringLiteral("fieldHintLabel"));
-        column->addWidget(captionLabel);
-        column->addWidget(button);
-        row->addLayout(column, 1);
+        cell->addWidget(captionLabel);
+        cell->addWidget(button);
+        grid->addLayout(cell, row, column);
     };
-    addSwatch(colorRow, QStringLiteral("标题"), m_titleColorButton);
-    addSwatch(colorRow, QStringLiteral("作者 / 朝代"), m_metadataColorButton);
-    addSwatch(colorRow, QStringLiteral("正文"), m_textColorButton);
-    colorLayout->addLayout(colorRow);
+    addSwatch(colorGrid, 0, 0, QStringLiteral("标题"), m_titleColorButton);
+    addSwatch(colorGrid, 0, 1, QStringLiteral("作者"), m_metadataColorButton);
+    addSwatch(colorGrid, 1, 0, QStringLiteral("朝代"), m_dynastyColorButton);
+    addSwatch(colorGrid, 1, 1, QStringLiteral("正文"), m_textColorButton);
     displayRoot->addWidget(colorCard);
 
     auto *layoutCard = new QGroupBox(QStringLiteral("版面"), displayPage);
@@ -541,6 +543,7 @@ void MainWindow::setupUi() {
     connect(m_textColorButton, &QPushButton::clicked, this, &MainWindow::chooseTextColor);
     connect(m_titleColorButton, &QPushButton::clicked, this, &MainWindow::chooseTitleColor);
     connect(m_metadataColorButton, &QPushButton::clicked, this, &MainWindow::chooseMetadataColor);
+    connect(m_dynastyColorButton, &QPushButton::clicked, this, &MainWindow::chooseDynastyColor);
     connect(m_panelColorButton, &QPushButton::clicked, this, &MainWindow::choosePanelColor);
     connect(m_typographyPreset, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::typographyPresetChanged);
     connect(m_fontCombo, &QFontComboBox::currentFontChanged, this, &MainWindow::displaySettingsChanged);
@@ -724,6 +727,7 @@ void MainWindow::updateSettingsUi() {
     const QSignalBlocker b5(m_titleColorButton);
     const QSignalBlocker b6(m_metadataColorButton);
     const QSignalBlocker b7(m_panelColorButton);
+    const QSignalBlocker b14(m_dynastyColorButton);
     const QSignalBlocker b8(m_panelCheck);
     const QSignalBlocker b9(m_shadowCheck);
     const QSignalBlocker b10(m_anchorCombo);
@@ -748,6 +752,8 @@ void MainWindow::updateSettingsUi() {
     m_titleColorButton->setStyleSheet(colorButtonStyle(m_config.render.titleColor));
     m_metadataColorButton->setText(m_config.render.metadataColor.name(QColor::HexArgb));
     m_metadataColorButton->setStyleSheet(colorButtonStyle(m_config.render.metadataColor));
+    m_dynastyColorButton->setText(m_config.render.dynastyColor.name(QColor::HexArgb));
+    m_dynastyColorButton->setStyleSheet(colorButtonStyle(m_config.render.dynastyColor));
     m_panelColorButton->setText(m_config.render.panelColor.name(QColor::HexArgb));
     m_panelColorButton->setStyleSheet(colorButtonStyle(m_config.render.panelColor));
     m_panelCheck->setChecked(m_config.render.panelEnabled);
@@ -1342,6 +1348,14 @@ void MainWindow::chooseMetadataColor() {
     displaySettingsChanged();
 }
 
+void MainWindow::chooseDynastyColor() {
+    const QColor color = QColorDialog::getColor(m_config.render.dynastyColor, this, QStringLiteral("选择朝代颜色"), QColorDialog::ShowAlphaChannel);
+    if (!color.isValid()) return;
+    m_config.render.dynastyColor = color;
+    updateSettingsUi();
+    displaySettingsChanged();
+}
+
 void MainWindow::typographyPresetChanged(int index) {
     if (index == 0) {
         m_config.render.titleScale = 1.50;
@@ -1390,6 +1404,8 @@ void MainWindow::displaySettingsChanged() {
     }
     if (titleColor.isValid()) m_config.render.titleColor = titleColor;
     if (metadataColor.isValid()) m_config.render.metadataColor = metadataColor;
+    const QColor dynastyColor(m_dynastyColorButton->text());
+    if (dynastyColor.isValid()) m_config.render.dynastyColor = dynastyColor;
     if (panelColor.isValid()) m_config.render.panelColor = panelColor;
     m_config.render.panelEnabled = m_panelCheck->isChecked();
     m_config.render.shadowEnabled = m_shadowCheck->isChecked();

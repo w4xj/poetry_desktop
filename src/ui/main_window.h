@@ -67,6 +67,7 @@ private slots:
     void chooseTextColor();
     void chooseTitleColor();
     void chooseMetadataColor();
+    void chooseDynastyColor();
     void choosePanelColor();
     void typographyPresetChanged(int index);
     void displaySettingsChanged();
@@ -170,6 +171,7 @@ private:
     QPushButton *m_textColorButton = nullptr;
     QPushButton *m_titleColorButton = nullptr;
     QPushButton *m_metadataColorButton = nullptr;
+    QPushButton *m_dynastyColorButton = nullptr;
     QPushButton *m_panelColorButton = nullptr;
     QCheckBox *m_panelCheck = nullptr;
     QCheckBox *m_shadowCheck = nullptr;

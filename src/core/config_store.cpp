@@ -42,6 +42,7 @@ QJsonObject renderToJson(const RenderSettings &render) {
         {QStringLiteral("titleWeight"), render.titleWeight},
         {QStringLiteral("titleColor"), colorToJson(render.titleColor)},
         {QStringLiteral("metadataColor"), colorToJson(render.metadataColor)},
+        {QStringLiteral("dynastyColor"), colorToJson(render.dynastyColor)},
         {QStringLiteral("contentColor"), colorToJson(render.contentColor)},
         {QStringLiteral("contentLineSpacing"), render.contentLineSpacing},
         {QStringLiteral("titleMetadataSpacing"), render.titleMetadataSpacing},
@@ -70,6 +71,7 @@ void renderFromJson(const QJsonObject &object, RenderSettings &render) {
     render.textColor = render.contentColor;
     render.titleColor = colorObjectToColor(object.value(QStringLiteral("titleColor")), render.titleColor);
     render.metadataColor = colorObjectToColor(object.value(QStringLiteral("metadataColor")), render.metadataColor);
+    render.dynastyColor = colorObjectToColor(object.value(QStringLiteral("dynastyColor")), render.dynastyColor);
 
     if (object.value(QStringLiteral("titleScale")).isDouble())
         render.titleScale = qBound(1.0, object.value(QStringLiteral("titleScale")).toDouble(), 3.0);

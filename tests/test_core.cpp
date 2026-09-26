@@ -35,6 +35,7 @@ private slots:
     void rendererCreatesTargetWithText();
     void fontSettingChangesRenderedOutput();
     void rendererUsesLayeredSectionColors();
+    void rendererSeparatesAuthorAndDynastyColors();
     void rendererHandlesEmptySectionFields();
     void rendererHandlesResolutionsAndLongText();
     void rendererFallsBackForUnavailableChineseFont();
@@ -175,6 +176,39 @@ void CoreTests::rendererUsesLayeredSectionColors() {
     QVERIFY(red > 0);
     QVERIFY(green > 0);
     QVERIFY(blue > 0);
+}
+
+void CoreTests::rendererSeparatesAuthorAndDynastyColors() {
+    QImage source(QSize(900, 600), QImage::Format_ARGB32_Premultiplied);
+    source.fill(QColor(10, 10, 10));
+    Poem poem{QStringLiteral("byline"), QStringLiteral("Title"), QStringLiteral("Author"),
+              QStringLiteral("Dynasty"), QStringLiteral("Body"), {}, true};
+    RenderSettings settings;
+    settings.panelEnabled = false;
+    settings.shadowEnabled = false;
+    settings.fontFamily = QStringLiteral("Arial");
+    settings.fontPointSize = 30;
+    settings.titleColor = QColor(0, 0, 0);        // hidden against the dark canvas
+    settings.contentColor = QColor(0, 0, 0);
+    settings.textColor = QColor(0, 0, 0);
+    settings.metadataColor = QColor(255, 0, 0);   // author
+    settings.dynastyColor = QColor(0, 0, 255);    // dynasty, one step apart
+
+    WallpaperRenderer renderer;
+    const QImage output = renderer.render(source, poem, settings, QSize(900, 600));
+    QVERIFY(!output.isNull());
+
+    int authorPixels = 0;
+    int dynastyPixels = 0;
+    for (int y = 0; y < output.height(); ++y) {
+        for (int x = 0; x < output.width(); ++x) {
+            const QColor c = output.pixelColor(x, y);
+            if (c.red() > 170 && c.green() < 70 && c.blue() < 70) ++authorPixels;
+            if (c.blue() > 170 && c.red() < 70 && c.green() < 70) ++dynastyPixels;
+        }
+    }
+    QVERIFY2(authorPixels > 0, "the author was not drawn in its own colour");
+    QVERIFY2(dynastyPixels > 0, "the dynasty shares the author colour, so the byline has no hierarchy");
 }
 
 void CoreTests::rendererHandlesEmptySectionFields() {

@@ -63,6 +63,9 @@ struct RenderSettings {
     int titleWeight = 600;
     QColor titleColor = QColor(255, 255, 255, 255);
     QColor metadataColor = QColor(205, 205, 205, 220);
+    // The dynasty sits a step below the author so the byline reads as a
+    // hierarchy rather than one flat line of names.
+    QColor dynastyColor = QColor(205, 205, 205, 168);
     QColor contentColor = QColor(245, 241, 232, 255);
     double contentLineSpacing = 1.35;
     int titleMetadataSpacing = 12;

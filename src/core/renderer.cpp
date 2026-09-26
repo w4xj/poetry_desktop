@@ -105,7 +105,7 @@ TypographyLayout buildLayout(const Poem &poem, const RenderSettings &settings,
     if (!poem.author.trimmed().isEmpty())
         layout.author = makeWrapped(poem.author.trimmed(), authorFont, settings.metadataColor, maxWidth, 1.10);
     if (!poem.dynasty.trimmed().isEmpty())
-        layout.dynasty = makeWrapped(poem.dynasty.trimmed(), dynastyFont, settings.metadataColor, maxWidth, 1.10);
+        layout.dynasty = makeWrapped(poem.dynasty.trimmed(), dynastyFont, settings.dynastyColor, maxWidth, 1.10);
     layout.content = makeWrapped(poem.content.trimmed(), contentFont,
                                  settings.contentColor.isValid() ? settings.contentColor : settings.textColor,
                                  maxWidth, qMax<qreal>(1.0, settings.contentLineSpacing));

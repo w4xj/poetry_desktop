@@ -5,6 +5,26 @@
 - **Roles**: Product, Programmer, Test
 - **Scope**: desktop poetry wallpaper tool redesign
 
+## 0. 数值优先级裁定（2026-09-26）
+
+四份文档在字号、默认锚点、行距、面板色上互相矛盾，长期导致"改哪个都不对"。
+**本文件是渲染数值的唯一权威**，理由：它是唯一标记为 *agreed for implementation and product
+acceptance* 的文档，且日期最新（2026-08-07，晚于 TYPOGRAPHY_SPEC 的 08-05）。
+
+| 数值 | 权威值（本文件） | 被覆盖的说法 |
+|---|---|---|
+| 正文基准字号 | 36 pt @1920×1080，随分辨率缩放 | `PRODUCT_SPEC` / `UI_REDESIGN` 的 28；`TYPOGRAPHY_SPEC` 的 32 px |
+| 默认文字锚点 | `bottomRight` | `TYPOGRAPHY_SPEC` 的「雅致左下」`bottomLeft` |
+| 正文行距 | 1.35 | `TYPOGRAPHY_SPEC` 的 1.60 及其 TY-012 的 1.4–1.8 区间 |
+| 面板默认色 | `#99000000`（60% 黑） | `TYPOGRAPHY_SPEC` 的 `rgba(0,0,0,0.42)` |
+
+`TYPOGRAPHY_SPEC.md` 中**非数值的结构性规则仍然有效**，且已实现：标题 / 落款 / 正文三块独立排版
+（不得 join 成一个字符串一次 `drawText`）、落款组合为 `作者 · 朝代` 带间隔号、朝代比作者低一档
+透明度、层级靠字阶与透明度而非颜色种类、空字段自动收缩、溢出时逐级缩小而非静默裁剪、
+正文为空禁止生成、预览与壁纸走同一渲染路径、排版改动 220 ms 防抖。
+
+代码侧对应关系：`src/core/models.h` 的 `RenderSettings` 默认值即上表；改动数值前先改这里。
+
 ## 1. Product conclusion
 
 The original complaint is valid: wallpaper typography must be judged at the final wallpaper resolution, not only inside the settings form. A normal user should not need to zoom the preview to read the poem. The product baseline is:
@@ -15,7 +35,7 @@ The original complaint is valid: wallpaper typography must be judged at the fina
 - Body: normal weight, 1.35 line spacing, separate body color.
 - Text placement: top-left, top-right, center, bottom-left, bottom-right.
 - Style: preset, font family, body size, title/metadata/body colors, panel, panel color, shadow and image fit are adjustable.
-- UI text baseline: 12 pt, 36 px controls, 48 px primary action. Minimum window: 980x680.
+- UI text baseline: 12 pt, 28 px controls, 44 px primary action. Minimum window: 900x640 (logical).
 
 ## 2. Agreed information architecture
 
@@ -53,7 +73,7 @@ Preview and desktop are deliberately different states. Changing settings or sele
 - **Failure protection**: render/set failures never delete or replace the last successful wallpaper.
 - **Schedule**: enable, stop, change interval while active, restart application, and tray pause/resume are testable.
 - **Persistence**: restart retains resource lists, render settings, poems and schedule state.
-- **Responsive layout**: main window supports 980x680 minimum without clipping key actions; high DPI uses Qt logical sizing.
+- **Responsive layout**: main window supports 900x640 logical minimum without clipping key actions; high DPI uses Qt logical sizing. 1366x768 at 125% scaling is explicitly out of support (see README resolution table).
 - **Accessibility**: primary controls and management controls have stable object names for automated UI tests.
 
 ## 5. Product acceptance checklist

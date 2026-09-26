@@ -36,7 +36,7 @@ void UiTests::settingsControlsNeverOverlapEachOther() {
 
     // Checked at the default size and at the smallest size the app allows,
     // because a squeezed QFormLayout is exactly what collapsed before.
-    for (const QSize &canvas : {QSize(1440, 900), QSize(980, 680)}) {
+    for (const QSize &canvas : {QSize(1440, 900), QSize(1280, 800), QSize(1024, 700), QSize(900, 640)}) {
         window.resize(canvas);
         QTest::qWait(60);
 
@@ -154,8 +154,10 @@ void UiTests::layoutKeepsEveryRegionVisibleAndThePreviewDominant() {
 
 void UiTests::mainWindowExposesReadablePrimaryActions() {
     MainWindow window;
-    QVERIFY(window.minimumSize().width() >= 980);
-    QVERIFY(window.minimumSize().height() >= 680);
+    // Floor keeps the window usable; the real per-size layout guarantee lives in
+    // settingsControlsNeverOverlapEachOther, which measures at each size.
+    QVERIFY(window.minimumSize().width() >= 860);
+    QVERIFY(window.minimumSize().height() >= 600);
 
     auto *switchButton = window.findChild<QPushButton *>(QStringLiteral("switchWallpaperButton"));
     auto *applyButton = window.findChild<QPushButton *>(QStringLiteral("applyPreviewButton"));
