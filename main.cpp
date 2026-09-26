@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QIcon>
 #include <QMessageBox>
 #include <QLockFile>
 #include <QStandardPaths>
@@ -15,6 +16,7 @@ int main(int argc, char *argv[]) {
     app.setApplicationDisplayName(QStringLiteral("诗词壁纸"));
     app.setOrganizationName(QStringLiteral("PoetryDesktop"));
     app.setOrganizationDomain(QStringLiteral("local.poetry.desktop"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/app_icon.ico")));
 
     QString appData = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (appData.isEmpty()) appData = QDir::homePath() + QStringLiteral("/.poetry_desktop");

@@ -1,5 +1,5 @@
-﻿<RCC>
+<RCC>
     <qresource prefix="/">
-        <file>default_poems.json</file>
+        <file>app_icon.ico</file>
     </qresource>
 </RCC>

@@ -38,7 +38,6 @@
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
-#include <QStyle>
 #include <QSystemTrayIcon>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -572,7 +571,7 @@ void MainWindow::setupUi() {
 
 void MainWindow::setupTray() {
     m_tray = new QSystemTrayIcon(this);
-    m_tray->setIcon(style()->standardIcon(QStyle::SP_ComputerIcon));
+    m_tray->setIcon(QIcon(QStringLiteral(":/app_icon.ico")));
     m_tray->setToolTip(QStringLiteral("诗词壁纸"));
     auto *menu = new QMenu(this);
     auto *openAction = menu->addAction(QStringLiteral("打开主窗口"));

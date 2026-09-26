@@ -40,13 +40,24 @@ set(POETRY_HEADERS
 )
 
 qt_add_resources(POETRY_RESOURCES resources/resources.qrc)
-add_executable(poetry_desktop WIN32
+
+set(POETRY_APP_SOURCES
     main.cpp
     src/ui/main_window.cpp
     ${POETRY_CORE_SOURCES}
     ${POETRY_HEADERS}
     ${POETRY_RESOURCES}
 )
+if(WIN32)
+    # Gives the .exe itself an icon, which is what a taskbar pin shows.
+    list(APPEND POETRY_APP_SOURCES resources/app.rc)
+endif()
+
+add_executable(poetry_desktop WIN32 ${POETRY_APP_SOURCES})
+
+if(WIN32)
+    target_include_directories(poetry_desktop PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources")
+endif()
 
 target_include_directories(poetry_desktop PRIVATE src)
 target_link_libraries(poetry_desktop PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent)

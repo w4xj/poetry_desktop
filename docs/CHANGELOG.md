@@ -1,5 +1,37 @@
 # 变更说明
 
+## 2026-09-26 — 应用图标，以及把 qrc 里的死资源清掉
+
+### 图标
+
+新增 `resources/app_icon.ico`（深蓝夜空圆角块 + 月牙 + 山影 + 三条诗句横线），三处全覆盖：
+
+| 位置 | 实现 |
+|---|---|
+| 标题栏 / 任务栏（运行时） | `main.cpp` 里 `QApplication::setWindowIcon(QIcon(":/app_icon.ico"))` |
+| 右下角托盘 | `setupTray()` 改用同一个图标，替换掉原来的 `SP_ComputerIcon`（一台电脑） |
+| 资源管理器 / 固定到任务栏 | `resources/app.rc` 把 .ico 编进 PE 的 `.rsrc`，`CMakeLists.txt` 仅在 WIN32 加入该源文件 |
+
+**小尺寸单独做了简化版。** 完整构图在 16 px 下会糊成一团（月亮、山、诗句线挤在一起），
+而托盘正是 16 px 场景。所以 .ico 里 16/20/24 用「只有圆角底 + 月牙」的简化版，
+32 及以上用完整版。手工装配 ICO 而不是让 PIL 自动缩放，就是为了按尺寸分派不同原画。
+
+验证：`ExtractIconExW` 对 `poetry_desktop.exe` 返回组图标数 1（对照组 `Qt6Core.dll` 为 0），
+确认图标真的进了 PE 资源，而不只是 qrc 里有个文件。
+
+### 顺带清掉的死资源
+
+`resources.qrc` 里原本打包了 `default_poems.json`，但代码从不读它（默认诗词硬编码在
+`libraries.cpp` 的 `PoetryLibrary::defaultPoems()`）—— 白占二进制体积，还留两份真相。
+已从 qrc 移除，文件本身保留在 `resources/` 下作为示例数据。
+
+> 未处理：该 JSON 带 UTF-8 BOM。`QJsonDocument::fromJson` 是否接受 BOM 未实测，
+> 因此**没有**把它写进 README 当作"可直接导入的示例"。要当导入样例用的话需要先验一次。
+
+**验证**：`poetry_tests` 20 项、`poetry_ui_tests` 7 项全过。
+
+---
+
 ## 2026-09-24 — 第二轮界面调整：修掉重设计自己留下的重叠缺陷
 
 用户截图暴露：「显示设置」页里 `字体族 / 正文基准字号 / 排版预设` 三行标签互相叠印，
