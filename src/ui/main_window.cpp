@@ -33,6 +33,7 @@
 #include <QPalette>
 #include <QPushButton>
 #include <QScreen>
+#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
@@ -53,11 +54,25 @@
 namespace poetry {
 
 namespace {
+// Each settings page scrolls rather than being squeezed: a QFormLayout starved of
+// vertical height collapses its rows and paints labels over each other, which no
+// per-widget size check reveals. Returns the inner content widget to lay out into.
 QWidget *makeTabPage(QTabWidget *tabs, const QString &title) {
     auto *page = new QWidget(tabs);
     page->setObjectName(title + QStringLiteral("Page"));
+    auto *scroll = new QScrollArea(page);
+    scroll->setObjectName(title + QStringLiteral("Scroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto *content = new QWidget(scroll);
+    content->setObjectName(title + QStringLiteral("Content"));
+    scroll->setWidget(content);
+    auto *outer = new QVBoxLayout(page);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->addWidget(scroll);
     tabs->addTab(page, title);
-    return page;
+    return content;
 }
 QString imageFilter() { return QStringLiteral("图片 (*.png *.jpg *.jpeg *.bmp *.webp)"); }
 }
@@ -100,7 +115,7 @@ void MainWindow::setupUi() {
     setStyleSheet(QStringLiteral(R"(
         QWidget#rootCanvas { background: #eef2f7; }
 
-        QLabel { color: #1f2937; font-size: 12pt; }
+        QLabel { color: #1f2937; font-size: 11pt; }
         QLabel#appTitleLabel { font-size: 20pt; font-weight: 700; color: #0f172a; }
         QLabel#appSubtitleLabel { font-size: 10pt; color: #64748b; }
         QLabel#resourceSummaryLabel, QLabel#scheduleSummaryLabel { font-size: 11pt; color: #475569; }
@@ -108,20 +123,19 @@ void MainWindow::setupUi() {
         QLabel#selectedImageInfoLabel, QLabel#poemCountLabel, QLabel#scheduleNextLabel,
         QLabel#fieldHintLabel { font-size: 10pt; color: #64748b; }
         QLabel#previewContentLabel { font-size: 11pt; color: #334155; }
-        QLabel#sectionTitleLabel { font-size: 11pt; font-weight: 700; color: #334155; }
         QLabel#previewLabel { background: #10151d; color: #8d99a8; border: 1px solid #2a3441; border-radius: 10px; }
 
         QGroupBox { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;
-                    margin-top: 13px; padding: 14px 14px 12px; font-size: 11pt; font-weight: 700; color: #334155; }
+                    margin-top: 11px; padding: 11px 12px 10px; font-size: 11pt; font-weight: 700; color: #334155; }
         QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }
 
-        QPushButton { min-height: 34px; padding: 5px 14px; border: 1px solid #cbd5e1; border-radius: 8px;
-                      background: #ffffff; color: #1f2937; font-size: 12pt; }
+        QPushButton { min-height: 28px; padding: 2px 11px; border: 1px solid #cbd5e1; border-radius: 7px;
+                      background: #ffffff; color: #1f2937; font-size: 11pt; }
         QPushButton:hover { background: #f1f5f9; border-color: #94a3b8; }
         QPushButton:pressed { background: #e2e8f0; }
         QPushButton:disabled { color: #a3afbd; background: #f4f6f9; border-color: #e4e9ef; }
-        QPushButton#switchWallpaperButton { min-height: 48px; background: #2563eb; border: none;
-                                            color: #ffffff; font-size: 14pt; font-weight: 700; }
+        QPushButton#switchWallpaperButton { min-height: 44px; padding: 4px 18px; background: #2563eb; border: none;
+                                            color: #ffffff; font-size: 12pt; font-weight: 700; }
         QPushButton#switchWallpaperButton:hover { background: #1d4ed8; }
         QPushButton#switchWallpaperButton:pressed { background: #1e40af; }
         QPushButton#switchWallpaperButton:disabled { background: #c3d3f2; color: #f2f6fd; }
@@ -133,30 +147,30 @@ void MainWindow::setupUi() {
         QPushButton#resetDisplaySettingsButton { border-color: transparent; background: transparent; color: #475569; }
         QPushButton#resetDisplaySettingsButton:hover { background: #f1f5f9; border-color: #cbd5e1; }
 
-        QToolButton#moreMenuButton { min-height: 34px; padding: 5px 12px; border: 1px solid #cbd5e1;
-                                     border-radius: 8px; background: #ffffff; color: #1f2937; font-size: 12pt; }
+        QToolButton#moreMenuButton { min-height: 28px; padding: 2px 11px; border: 1px solid #cbd5e1;
+                                     border-radius: 7px; background: #ffffff; color: #1f2937; font-size: 11pt; }
         QToolButton#moreMenuButton:hover { background: #f1f5f9; border-color: #94a3b8; }
 
-        QComboBox, QFontComboBox, QSpinBox, QLineEdit { min-height: 32px; padding: 2px 8px;
-                                                        border: 1px solid #cbd5e1; border-radius: 8px;
-                                                        background: #ffffff; color: #1f2937; font-size: 12pt; }
+        QComboBox, QFontComboBox, QSpinBox, QLineEdit { min-height: 28px; padding: 1px 8px;
+                                                        border: 1px solid #cbd5e1; border-radius: 7px;
+                                                        background: #ffffff; color: #1f2937; font-size: 11pt; }
         QComboBox:focus, QFontComboBox:focus, QSpinBox:focus, QLineEdit:focus { border-color: #2563eb; }
 
         QListWidget, QTableWidget, QTextEdit { border: 1px solid #e2e8f0; border-radius: 8px;
-                                               background: #ffffff; color: #1f2937; font-size: 12pt; }
-        QListWidget::item { min-height: 30px; padding: 3px 4px; }
+                                               background: #ffffff; color: #1f2937; font-size: 11pt; }
+        QListWidget::item { min-height: 24px; padding: 2px 4px; }
         QListWidget::item:selected { background: #e0eafe; color: #14336b; }
         QTableWidget { gridline-color: #eef2f6; alternate-background-color: #f8fafc; }
         QTableWidget::item:selected { background: #e0eafe; color: #14336b; }
-        QHeaderView::section { min-height: 32px; padding: 4px 8px; border: none;
+        QHeaderView::section { min-height: 26px; padding: 3px 8px; border: none;
                                border-bottom: 1px solid #e2e8f0; background: #f8fafc;
-                               font-size: 11pt; font-weight: 600; color: #475569; }
-        QCheckBox { font-size: 12pt; color: #1f2937; spacing: 8px; }
+                               font-size: 10pt; font-weight: 600; color: #475569; }
+        QCheckBox { font-size: 11pt; color: #1f2937; spacing: 8px; }
 
         QTabWidget::pane { border: none; }
         QTabBar { background: transparent; }
-        QTabBar::tab { min-height: 32px; padding: 5px 14px; margin-right: 6px;
-                       border: 1px solid transparent; border-radius: 8px;
+        QTabBar::tab { min-height: 26px; padding: 3px 12px; margin-right: 5px;
+                       border: 1px solid transparent; border-radius: 7px;
                        background: transparent; color: #5b6b7f; font-size: 11pt; }
         QTabBar::tab:selected { background: #ffffff; border-color: #dde5ee; color: #0f172a; font-weight: 600; }
         QTabBar::tab:!selected:hover { color: #1f2937; }
@@ -219,59 +233,53 @@ void MainWindow::setupUi() {
     auto *previewGroup = new QGroupBox(QStringLiteral("壁纸预览"), body);
     previewGroup->setMinimumWidth(520);
     auto *previewLayout = new QVBoxLayout(previewGroup);
-    previewLayout->setSpacing(8);
+    previewLayout->setSpacing(10);
     m_previewLabel = new QLabel(QStringLiteral("还没有可用预览\n请先添加图片目录并导入诗词库"), previewGroup);
     m_previewLabel->setObjectName(QStringLiteral("previewLabel"));
     m_previewLabel->setAlignment(Qt::AlignCenter);
-    m_previewLabel->setMinimumSize(620, 380);
+    m_previewLabel->setMinimumSize(520, 300);
     m_previewLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_previewLabel->installEventFilter(this);
     previewLayout->addWidget(m_previewLabel, 1);
-    m_previewHintLabel = new QLabel(QStringLiteral("修改显示设置后会实时更新预览，不会自动修改桌面。"), previewGroup);
+
+    auto *actionBar = new QHBoxLayout();
+    actionBar->setSpacing(8);
+    m_switchButton = new QPushButton(QStringLiteral("随机换一张壁纸"), previewGroup);
+    m_switchButton->setObjectName(QStringLiteral("switchWallpaperButton"));
+    m_switchButton->setToolTip(QStringLiteral("\u968f\u673a\u9009\u62e9\u4e00\u5f20\u56fe\u7247\u548c\u4e00\u9996\u542f\u7528\u8bd7\u8bcd\uff0c\u751f\u6210\u5e76\u8bbe\u7f6e\u684c\u9762\u58c1\u7eb8"));
+    m_switchButton->setMinimumHeight(44);
+    m_applyPreviewButton = new QPushButton(QStringLiteral("应用当前预览"), previewGroup);
+    m_applyPreviewButton->setObjectName(QStringLiteral("applyPreviewButton"));
+    m_applyPreviewButton->setToolTip(QStringLiteral("\u628a\u5f53\u524d\u9884\u89c8\u76f4\u63a5\u5e94\u7528\u5230 Windows \u684c\u9762\uff0c\u4e0d\u91cd\u65b0\u968f\u673a\u5185\u5bb9"));
+    m_refreshPreviewButton = new QPushButton(QStringLiteral("重新预览"), previewGroup);
+    m_refreshPreviewButton->setObjectName(QStringLiteral("refreshPreviewButton"));
+    m_pauseButton = new QPushButton(QStringLiteral("开启定时"), previewGroup);
+    m_pauseButton->setObjectName(QStringLiteral("pauseScheduleButton"));
+    m_pauseButton->setToolTip(QStringLiteral("\u5feb\u901f\u5f00\u542f\u6216\u505c\u6b62\u5b9a\u65f6\u5207\u6362"));
+    actionBar->addWidget(m_switchButton);
+    actionBar->addWidget(m_applyPreviewButton);
+    actionBar->addWidget(m_refreshPreviewButton);
+    actionBar->addWidget(m_pauseButton);
+    actionBar->addStretch();
+    previewLayout->addLayout(actionBar);
+
+    auto *captionRow = new QHBoxLayout();
+    captionRow->setSpacing(10);
+    m_previewContentLabel = new QLabel(QStringLiteral("暂无预览内容"), previewGroup);
+    m_previewContentLabel->setObjectName(QStringLiteral("previewContentLabel"));
+    m_previewHintLabel = new QLabel(QStringLiteral("预览不会自动修改桌面"), previewGroup);
     m_previewHintLabel->setObjectName(QStringLiteral("previewHintLabel"));
-    m_previewHintLabel->setWordWrap(true);
-    previewLayout->addWidget(m_previewHintLabel);
+    m_previewHintLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    captionRow->addWidget(m_previewContentLabel, 1);
+    captionRow->addWidget(m_previewHintLabel);
+    previewLayout->addLayout(captionRow);
     body->addWidget(previewGroup);
 
     auto *rail = new QWidget(body);
     rail->setObjectName(QStringLiteral("sideRail"));
-    rail->setMinimumWidth(470);
+    rail->setMinimumWidth(430);
     auto *railLayout = new QVBoxLayout(rail);
     railLayout->setContentsMargins(0, 0, 0, 0);
-    railLayout->setSpacing(12);
-
-    auto *actionGroup = new QGroupBox(QStringLiteral("操作"), rail);
-    auto *actionLayout = new QVBoxLayout(actionGroup);
-    actionLayout->setSpacing(8);
-    m_switchButton = new QPushButton(QStringLiteral("随机换一张壁纸"), actionGroup);
-    m_switchButton->setObjectName(QStringLiteral("switchWallpaperButton"));
-    m_switchButton->setToolTip(QStringLiteral("\u968f\u673a\u9009\u62e9\u4e00\u5f20\u56fe\u7247\u548c\u4e00\u9996\u542f\u7528\u8bd7\u8bcd\uff0c\u751f\u6210\u5e76\u8bbe\u7f6e\u684c\u9762\u58c1\u7eb8"));
-    m_switchButton->setMinimumHeight(48);
-    m_applyPreviewButton = new QPushButton(QStringLiteral("应用当前预览"), actionGroup);
-    m_applyPreviewButton->setObjectName(QStringLiteral("applyPreviewButton"));
-    m_applyPreviewButton->setToolTip(QStringLiteral("\u628a\u5f53\u524d\u9884\u89c8\u76f4\u63a5\u5e94\u7528\u5230 Windows \u684c\u9762\uff0c\u4e0d\u91cd\u65b0\u968f\u673a\u5185\u5bb9"));
-    m_refreshPreviewButton = new QPushButton(QStringLiteral("重新预览"), actionGroup);
-    m_refreshPreviewButton->setObjectName(QStringLiteral("refreshPreviewButton"));
-    m_pauseButton = new QPushButton(QStringLiteral("开启定时"), actionGroup);
-    m_pauseButton->setObjectName(QStringLiteral("pauseScheduleButton"));
-    m_pauseButton->setToolTip(QStringLiteral("\u5feb\u901f\u5f00\u542f\u6216\u505c\u6b62\u5b9a\u65f6\u5207\u6362"));
-    auto *minorRow = new QHBoxLayout();
-    minorRow->setSpacing(8);
-    minorRow->addWidget(m_refreshPreviewButton);
-    minorRow->addWidget(m_pauseButton);
-    actionLayout->addWidget(m_switchButton);
-    actionLayout->addWidget(m_applyPreviewButton);
-    actionLayout->addLayout(minorRow);
-    auto *summaryTitle = new QLabel(QStringLiteral("当前预览内容"), actionGroup);
-    summaryTitle->setObjectName(QStringLiteral("sectionTitleLabel"));
-    m_previewContentLabel = new QLabel(QStringLiteral("暂无"), actionGroup);
-    m_previewContentLabel->setObjectName(QStringLiteral("previewContentLabel"));
-    m_previewContentLabel->setWordWrap(true);
-    m_previewContentLabel->setMinimumHeight(66);
-    actionLayout->addSpacing(4);
-    actionLayout->addWidget(summaryTitle);
-    actionLayout->addWidget(m_previewContentLabel);
-    railLayout->addWidget(actionGroup);
 
     m_tabs = new QTabWidget(rail);
     m_tabs->setObjectName(QStringLiteral("resourceSettingsTabs"));
@@ -281,9 +289,9 @@ void MainWindow::setupUi() {
     railLayout->addWidget(m_tabs, 1);
 
     body->addWidget(rail);
-    body->setStretchFactor(0, 6);
-    body->setStretchFactor(1, 5);
-    body->setSizes({860, 640});
+    body->setStretchFactor(0, 7);
+    body->setStretchFactor(1, 4);
+    body->setSizes({900, 520});
     root->addWidget(body, 1);
 
     auto *statusStrip = new QHBoxLayout();
@@ -296,7 +304,9 @@ void MainWindow::setupUi() {
 
     auto *imagePage = makeTabPage(m_tabs, QStringLiteral("图片库"));
     auto *imageRoot = new QVBoxLayout(imagePage);
-    auto *imageToolbar = new QHBoxLayout();
+    auto *imageToolbar = new QGridLayout();
+    imageToolbar->setHorizontalSpacing(8);
+    imageToolbar->setVerticalSpacing(8);
     m_selectImageButton = new QPushButton(QStringLiteral("选择图片…"), imagePage);
     m_selectImageButton->setObjectName(QStringLiteral("selectImageButton"));
     m_addImageDirectoryButton = new QPushButton(QStringLiteral("添加图片目录"), imagePage);
@@ -305,13 +315,12 @@ void MainWindow::setupUi() {
     removeDirectoryButton->setObjectName(QStringLiteral("removeImageDirectoryButton"));
     auto *rescanButton = new QPushButton(QStringLiteral("重新扫描"), imagePage);
     rescanButton->setObjectName(QStringLiteral("rescanImagesButton"));
-    imageToolbar->addWidget(m_selectImageButton);
-    imageToolbar->addWidget(m_addImageDirectoryButton);
-    imageToolbar->addWidget(removeDirectoryButton);
-    imageToolbar->addWidget(rescanButton);
-    imageToolbar->addStretch();
+    imageToolbar->addWidget(m_selectImageButton, 0, 0);
+    imageToolbar->addWidget(m_addImageDirectoryButton, 0, 1);
+    imageToolbar->addWidget(removeDirectoryButton, 1, 0);
+    imageToolbar->addWidget(rescanButton, 1, 1);
     imageRoot->addLayout(imageToolbar);
-    auto *imageSplitter = new QSplitter(Qt::Horizontal, imagePage);
+    auto *imageSplitter = new QSplitter(Qt::Vertical, imagePage);
     auto *directoryGroup = new QGroupBox(QStringLiteral("图片来源目录"), imageSplitter);
     auto *directoryLayout = new QVBoxLayout(directoryGroup);
     m_imageDirectories = new QListWidget(directoryGroup);
@@ -328,8 +337,8 @@ void MainWindow::setupUi() {
     fileLayout->addWidget(m_imageFiles);
     imageSplitter->addWidget(directoryGroup);
     imageSplitter->addWidget(fileGroup);
-    imageSplitter->setStretchFactor(0, 1);
-    imageSplitter->setStretchFactor(1, 2);
+    imageSplitter->setStretchFactor(0, 2);
+    imageSplitter->setStretchFactor(1, 3);
     imageRoot->addWidget(imageSplitter, 1);
     m_selectedImageInfoLabel = new QLabel(QStringLiteral("请选择一张图片"), imagePage);
     m_selectedImageInfoLabel->setObjectName(QStringLiteral("selectedImageInfoLabel"));
@@ -377,7 +386,7 @@ void MainWindow::setupUi() {
     m_poemTable->setHorizontalHeaderLabels({QStringLiteral("启用"), QStringLiteral("标题"), QStringLiteral("作者"), QStringLiteral("正文摘要")});
     m_poemTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_poemTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_poemTable->verticalHeader()->setDefaultSectionSize(42);
+    m_poemTable->verticalHeader()->setDefaultSectionSize(32);
     m_poemTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_poemTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     poemRoot->addWidget(m_poemTable, 1);
@@ -801,13 +810,17 @@ void MainWindow::rescalePreview() {
 
 void MainWindow::updatePreviewSummary() {
     if (!m_hasPreviewContent) {
-        m_previewContentLabel->setText(QStringLiteral("暂无当前预览"));
+        m_previewContentLabel->setText(QStringLiteral("暂无预览内容"));
+        m_previewContentLabel->setToolTip(QString());
         return;
     }
     const QString poemTitle = m_previewPoem.title.isEmpty() ? m_previewPoem.content.left(20) : m_previewPoem.title;
-    const QString author = m_previewPoem.author.isEmpty() ? QString() : QStringLiteral("\n作者：%1").arg(m_previewPoem.author);
-    const QString imageName = m_previewImage.path.isEmpty() ? QStringLiteral("未知") : QFileInfo(m_previewImage.path).fileName();
-    m_previewContentLabel->setText(QStringLiteral("诗词：%1%2\n图片：%3").arg(poemTitle, author, imageName));
+    const QString imageName = m_previewImage.path.isEmpty() ? QStringLiteral("未知图片") : QFileInfo(m_previewImage.path).fileName();
+    QStringList parts;
+    parts << poemTitle;
+    if (!m_previewPoem.author.isEmpty()) parts << m_previewPoem.author;
+    parts << imageName;
+    m_previewContentLabel->setText(QStringLiteral("当前预览：%1").arg(parts.join(QStringLiteral(" · "))));
     m_previewContentLabel->setToolTip(m_previewImage.path);
 }
 

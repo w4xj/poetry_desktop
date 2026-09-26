@@ -2,10 +2,13 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QLabel>
+#include <QListWidget>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTabWidget>
+#include <QTableWidget>
 #include <QtTest>
 
 using namespace poetry;
@@ -17,7 +20,68 @@ private slots:
     void poemManagementActionsArePresent();
     void scheduleControlsExposeSafeBounds();
     void layoutKeepsEveryRegionVisibleAndThePreviewDominant();
+    void settingsControlsNeverOverlapEachOther();
 };
+
+// A QFormLayout squeezed for vertical height collapses its rows and paints the
+// labels on top of each other, which no size check catches on its own. Walk each
+// tab page and assert sibling controls keep disjoint rectangles.
+void UiTests::settingsControlsNeverOverlapEachOther() {
+    MainWindow window;
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    auto *tabs = window.findChild<QTabWidget *>(QStringLiteral("resourceSettingsTabs"));
+    QVERIFY(tabs);
+
+    // Checked at the default size and at the smallest size the app allows,
+    // because a squeezed QFormLayout is exactly what collapsed before.
+    for (const QSize &canvas : {QSize(1440, 900), QSize(980, 680)}) {
+        window.resize(canvas);
+        QTest::qWait(60);
+
+        for (int page = 0; page < tabs->count(); ++page) {
+            tabs->setCurrentIndex(page);
+            QTest::qWait(30);
+            QWidget *current = tabs->currentWidget();
+            QVERIFY(current);
+
+            QList<QWidget *> controls;
+            const QList<QWidget *> descendants = current->findChildren<QWidget *>();
+            for (QWidget *widget : descendants) {
+                const bool interesting = qobject_cast<QPushButton *>(widget)
+                    || qobject_cast<QComboBox *>(widget)
+                    || qobject_cast<QSpinBox *>(widget)
+                    || qobject_cast<QCheckBox *>(widget)
+                    || qobject_cast<QLabel *>(widget)
+                    || qobject_cast<QListWidget *>(widget)
+                    || qobject_cast<QTableWidget *>(widget);
+                if (!interesting || !widget->isVisible() || widget->rect().isEmpty()) continue;
+                controls.append(widget);
+            }
+            QVERIFY2(controls.size() > 1, qPrintable(QStringLiteral("tab %1 exposed no controls").arg(page)));
+
+            const auto rectText = [](const QRect &r) {
+                return QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
+            };
+            for (int i = 0; i < controls.size(); ++i) {
+                for (int j = i + 1; j < controls.size(); ++j) {
+                    const QRect a(controls.at(i)->mapTo(&window, QPoint(0, 0)), controls.at(i)->size());
+                    const QRect b(controls.at(j)->mapTo(&window, QPoint(0, 0)), controls.at(j)->size());
+                    if (a.contains(b) || b.contains(a)) continue;   // nesting is fine
+                    const QRect both = a.intersected(b);
+                    QVERIFY2(both.width() <= 2 || both.height() <= 2,
+                             qPrintable(QStringLiteral("at %1x%2, tab %3: %4 (%5) overlaps %6 (%7) in %8")
+                                 .arg(canvas.width()).arg(canvas.height()).arg(page)
+                                 .arg(QLatin1String(controls.at(i)->metaObject()->className()), rectText(a))
+                                 .arg(QLatin1String(controls.at(j)->metaObject()->className()), rectText(b))
+                                 .arg(rectText(both))));
+                }
+            }
+        }
+    }
+    window.resize(1440, 900);
+}
 
 // Object-name presence alone did not catch a regression where a list control
 // stopped painting entirely, so assert real geometry after a layout pass.
