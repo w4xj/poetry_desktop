@@ -156,4 +156,7 @@ logs/app.log           日志，超过 1MB 轮转为 app.log.1
 | exe 双击/Debug 起来即退出 | Qt 的 `bin` 不在 PATH，见「CLion 配置 3」 |
 | 界面中文显示成 `?` | 编辑时用了非 UTF-8 编码，见「CLion 配置 4」 |
 | 点单个测试用例报找不到 DLL | gutter 运行不走 ctest，见「测试」一节 |
+| 编译随机报 `Fatal error: can't create ...obj: Invalid argument` / `ar.exe: unable to copy file objects.a` | 构建目录并发写入被抢（杀软实时扫描 + IDE 索引，且本项目的构建目录被 git 跟踪）。**改用 `-j 1` 串行构建即可通过**，或在 IDE 里执行 Tools → CMake → Reset Cache and Reload Project 重建目录 |
+| 加了测试用例但运行数量没变 | AUTOMOC 可能不重新生成 `*_autogen/include/*.moc`，新槽位不注册且**不报错**。删掉构建目录重来才能看到真实数量 |
+| 编译中文变成字面 `?` | 见「CLion 配置 4」，Project Encoding 必须是 UTF-8 |
 | 提示「诗词壁纸已经在运行中」 | 存在 `poetry_desktop.lock`；确认无残留进程后删除该文件 |
