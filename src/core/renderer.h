@@ -8,6 +8,11 @@
 
 namespace poetry {
 
+// Wraps text to maxWidth, honouring the Chinese typesetting rules that forbid
+// closing punctuation at the start of a line and opening punctuation at its end.
+// Exposed so the line-breaking rules can be tested without rendering.
+QStringList wrapPoemText(const QString &text, const QFontMetrics &metrics, int maxWidth);
+
 class WallpaperRenderer {
 public:
     QImage render(const QImage &source, const Poem &poem, const RenderSettings &settings,

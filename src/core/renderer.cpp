@@ -9,6 +9,15 @@ namespace poetry {
 
 namespace {
 
+// 避头尾：收尾标点不得成为行首，起首标点不得留在行尾。
+bool startsLineForbidden(QChar ch) {
+    return QStringLiteral("，。、；：！？）》」』】〉…—·%）]}\"'").contains(ch);
+}
+
+bool endsLineForbidden(QChar ch) {
+    return QStringLiteral("（《「『【〈“‘([").contains(ch);
+}
+
 struct WrappedText {
     QStringList lines;
     QFont font;
@@ -20,39 +29,13 @@ struct WrappedText {
     bool isEmpty() const { return lines.isEmpty(); }
 };
 
-QStringList wrapText(const QString &text, const QFontMetrics &metrics, int maxWidth) {
-    QStringList result;
-    const QString normalized = text;
-    const QStringList paragraphs = normalized.split(QChar('\n'), Qt::KeepEmptyParts);
-    for (const QString &paragraph : paragraphs) {
-        if (paragraph.isEmpty()) {
-            result.append(QString());
-            continue;
-        }
-
-        QString current;
-        for (const QChar ch : paragraph) {
-            const QString candidate = current + ch;
-            if (!current.isEmpty() && metrics.horizontalAdvance(candidate) > maxWidth) {
-                result.append(current);
-                current = QString(ch);
-            } else {
-                current = candidate;
-            }
-        }
-        if (!current.isEmpty()) result.append(current);
-    }
-    if (result.isEmpty()) result.append(QString());
-    return result;
-}
-
 WrappedText makeWrapped(const QString &text, const QFont &font, const QColor &color,
                         int maxWidth, qreal lineSpacing) {
     WrappedText wrapped;
     wrapped.font = font;
     wrapped.color = color;
     const QFontMetrics metrics(font);
-    wrapped.lines = wrapText(text, metrics, maxWidth);
+    wrapped.lines = wrapPoemText(text, metrics, maxWidth);
     wrapped.lineHeight = qMax(metrics.height(), qRound(metrics.height() * lineSpacing));
     for (const QString &line : wrapped.lines)
         wrapped.width = qMax(wrapped.width, metrics.horizontalAdvance(line));
@@ -196,6 +179,43 @@ QString resolveFontFamily(const QString &requested, QString *warning) {
 }
 
 } // namespace
+
+QStringList wrapPoemText(const QString &text, const QFontMetrics &metrics, int maxWidth) {
+    QStringList result;
+    const QStringList paragraphs = text.split(QChar('\n'), Qt::KeepEmptyParts);
+    for (const QString &paragraph : paragraphs) {
+        if (paragraph.isEmpty()) {
+            result.append(QString());
+            continue;
+        }
+
+        QString current;
+        for (const QChar ch : paragraph) {
+            const QString candidate = current + ch;
+            if (current.isEmpty() || metrics.horizontalAdvance(candidate) <= maxWidth) {
+                current = candidate;
+                continue;
+            }
+            // The break falls here. Carry the offending neighbour onto the next
+            // line with it rather than stranding it: a lone 。 heading a line is
+            // the defect users actually see, and a 「 left at the tail is its twin.
+            QString next(ch);
+            while (current.size() > 1 && endsLineForbidden(current.back())) {
+                next.prepend(current.back());
+                current.chop(1);
+            }
+            if (current.size() > 1 && startsLineForbidden(ch)) {
+                next.prepend(current.back());
+                current.chop(1);
+            }
+            result.append(current);
+            current = next;
+        }
+        if (!current.isEmpty()) result.append(current);
+    }
+    if (result.isEmpty()) result.append(QString());
+    return result;
+}
 
 QImage WallpaperRenderer::prepareBackground(const QImage &source, const RenderSettings &settings, const QSize &targetSize) {
     QImage canvas(targetSize, QImage::Format_ARGB32_Premultiplied);

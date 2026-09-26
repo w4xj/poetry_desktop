@@ -5,6 +5,8 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFont>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QImage>
 #include <QImageReader>
@@ -76,6 +78,7 @@ private slots:
     void cacheCleanupPreservesCurrent();
     void cacheCleanupProtectsActiveWallpaperAcrossPreviews();
     void renderingRepeatedlyDoesNotGrowUnbounded();
+    void wrapHonoursChineseLineBreakingRules();
 };
 
 void CoreTests::poemImportAndValidation() {
@@ -606,6 +609,53 @@ void CoreTests::renderingRepeatedlyDoesNotGrowUnbounded() {
     QVERIFY2(growthKB < 60 * 1024,
              qPrintable(QStringLiteral("working set grew %1 MB between render 20 and 60")
                  .arg(growthKB / 1024)));
+}
+
+// 中文避头尾：收尾标点不能开头，起首标点不能收尾。
+void CoreTests::wrapHonoursChineseLineBreakingRules() {
+    QFont font(QStringLiteral("Arial"));
+    font.setPointSize(20);
+    const QFontMetrics metrics(font);
+
+    QString text;
+    for (int i = 0; i < 6; ++i) {
+        text += QStringLiteral("隐约雷鸣，阴霾天空，但盼风雨来，能留你在此。");
+    }
+
+    const QStringList lines = wrapPoemText(text, metrics, 200);
+    QVERIFY2(lines.size() > 3, qPrintable(QStringLiteral("expected real wrapping, got %1 lines").arg(lines.size())));
+
+    const QString noLineStart = QStringLiteral("，。、；：！？）》」』】〉…—·");
+    const QString noLineEnd = QStringLiteral("（《「『【〈“‘");
+
+    // Prove this input is actually discriminating: a naive character-by-character
+    // wrap of the same text at the same width must strand punctuation, otherwise
+    // the assertions below could pass for the wrong reason.
+    QStringList naive;
+    QString run;
+    for (const QChar ch : text) {
+        const QString candidate = run + ch;
+        if (!run.isEmpty() && metrics.horizontalAdvance(candidate) > 200) {
+            naive.append(run);
+            run = QString(ch);
+        } else {
+            run = candidate;
+        }
+    }
+    if (!run.isEmpty()) naive.append(run);
+    bool naiveStrands = false;
+    for (const QString &line : naive) {
+        if (!line.isEmpty() && noLineStart.contains(line.at(0))) naiveStrands = true;
+    }
+    QVERIFY2(naiveStrands, "test input no longer triggers the naive defect; the assertions below are vacuous");
+
+    for (const QString &line : lines) {
+        if (line.isEmpty()) continue;
+        QVERIFY2(!noLineStart.contains(line.at(0)),
+                 qPrintable(QStringLiteral("line 「%1」 starts with closing punctuation").arg(line)));
+        QVERIFY2(!noLineEnd.contains(line.back()),
+                 qPrintable(QStringLiteral("line 「%1」 ends with opening punctuation").arg(line)));
+    }
 }
 
 int main(int argc, char **argv) {
