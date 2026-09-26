@@ -79,6 +79,9 @@ private slots:
     void cacheCleanupProtectsActiveWallpaperAcrossPreviews();
     void renderingRepeatedlyDoesNotGrowUnbounded();
     void wrapHonoursChineseLineBreakingRules();
+    void rendererDrawsBothHalvesOfAPairedPoem();
+    void relationTagCanBeTurnedOff();
+    void pairedPoemSurvivesConfigRoundTrip();
 };
 
 void CoreTests::poemImportAndValidation() {
@@ -656,6 +659,119 @@ void CoreTests::wrapHonoursChineseLineBreakingRules() {
         QVERIFY2(!noLineEnd.contains(line.back()),
                  qPrintable(QStringLiteral("line 「%1」 ends with opening punctuation").arg(line)));
     }
+}
+
+namespace {
+qint64 inkPixels(const QImage &image) {
+    qint64 count = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QColor c = image.pixelColor(x, y);
+            if (c.red() + c.green() + c.blue() > 120) ++count;
+        }
+    }
+    return count;
+}
+
+Poem pairedFixture() {
+    Poem poem;
+    poem.id = QStringLiteral("paired");
+    poem.title = QStringLiteral("雷神短歌");
+    poem.author = QStringLiteral("柿本人麻吕");
+    poem.dynasty = QStringLiteral("飞鸟");
+    poem.content = QStringLiteral("隐约雷鸣，阴霾天空，但盼风雨来，能留你在此。");
+    poem.secondTitle = QStringLiteral("和风答章");
+    poem.secondAuthor = QStringLiteral("大伴家持");
+    poem.secondDynasty = QStringLiteral("奈良");
+    poem.secondContent = QStringLiteral("隐约雷鸣，阴霾天空，即使天无雨，我亦留此地。");
+    poem.relation = QStringLiteral("qa");
+    poem.enabled = true;
+    return poem;
+}
+
+RenderSettings pairedSettings() {
+    RenderSettings settings;
+    settings.fontFamily = QStringLiteral("Arial");
+    settings.fontPointSize = 22;
+    settings.panelEnabled = false;
+    settings.shadowEnabled = false;
+    settings.contentColor = QColor(250, 250, 250);
+    settings.textColor = QColor(250, 250, 250);
+    settings.titleColor = QColor(250, 250, 250);
+    settings.anchor = Anchor::TopLeft;
+    return settings;
+}
+
+QImage pairedCanvas() {
+    QImage source(QSize(1400, 1000), QImage::Format_RGB32);
+    source.fill(QColor(8, 8, 8));
+    return source;
+}
+} // namespace
+
+void CoreTests::rendererDrawsBothHalvesOfAPairedPoem() {
+    const Poem paired = pairedFixture();
+    Poem single = paired;
+    single.secondContent.clear();
+
+    WallpaperRenderer renderer;
+    QString error;
+    const QImage both = renderer.render(pairedCanvas(), paired, pairedSettings(), QSize(1400, 1000), &error);
+    QVERIFY2(!both.isNull(), qPrintable(error));
+    QCOMPARE(both.size(), QSize(1400, 1000));
+
+    const QImage one = renderer.render(pairedCanvas(), single, pairedSettings(), QSize(1400, 1000), &error);
+    QVERIFY2(!one.isNull(), qPrintable(error));
+
+    const qint64 bothInk = inkPixels(both);
+    const qint64 oneInk = inkPixels(one);
+    QVERIFY2(bothInk > oneInk * 3 / 2,
+             qPrintable(QStringLiteral("paired drew %1 px vs single %2 px; the second half is missing")
+                 .arg(bothInk).arg(oneInk)));
+}
+
+void CoreTests::relationTagCanBeTurnedOff() {
+    const Poem paired = pairedFixture();
+    RenderSettings withTag = pairedSettings();
+    withTag.relationTagEnabled = true;
+    RenderSettings withoutTag = pairedSettings();
+    withoutTag.relationTagEnabled = false;
+
+    WallpaperRenderer renderer;
+    const QImage a = renderer.render(pairedCanvas(), paired, withTag, QSize(1400, 1000));
+    const QImage b = renderer.render(pairedCanvas(), paired, withoutTag, QSize(1400, 1000));
+    QVERIFY(!a.isNull() && !b.isNull());
+
+    int differing = 0;
+    for (int y = 0; y < a.height(); y += 3) {
+        for (int x = 0; x < a.width(); x += 3) {
+            if (a.pixelColor(x, y) != b.pixelColor(x, y)) ++differing;
+        }
+    }
+    QVERIFY2(differing > 20,
+             qPrintable(QStringLiteral("toggling the relation tag changed %1 sampled pixels").arg(differing)));
+}
+
+void CoreTests::pairedPoemSurvivesConfigRoundTrip() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    ConfigStore store(temp.path());
+    AppConfig config = ConfigStore::defaultConfig();
+    config.poems = {PoetryLibrary::defaultPoems().first(), pairedFixture()};
+    QString error;
+    QVERIFY(store.save(config, &error));
+
+    AppConfig loaded;
+    QVERIFY(store.load(loaded));
+    QCOMPARE(loaded.poems.size(), 2);
+    QVERIFY(!loaded.poems.at(0).isPaired());
+    QVERIFY(loaded.poems.at(1).isPaired());
+    QCOMPARE(loaded.poems.at(1).secondTitle, QStringLiteral("和风答章"));
+    QCOMPARE(loaded.poems.at(1).secondAuthor, QStringLiteral("大伴家持"));
+    QCOMPARE(loaded.poems.at(1).relation, QStringLiteral("qa"));
+    const QPair<QString, QString> labels = relationLabels(loaded.poems.at(1).relation);
+    QCOMPARE(labels.first, QStringLiteral("问"));
+    QCOMPARE(labels.second, QStringLiteral("答"));
 }
 
 int main(int argc, char **argv) {

@@ -1,5 +1,65 @@
 # 变更说明
 
+## 2026-09-26 — 中文避头尾折行 + 双诗（酬答／唱和／问答）体裁
+
+### 行首孤标点
+
+截图里出现一行只有一个「。」的情况。根因是 `wrapText` 纯按宽度切字符，不管标点归属。
+中文排版有"避头尾"规则：收尾标点（，。、；：！？）》」』】…—·）不得立于行首，
+起首标点（（《「『【〈“‘）不得留在行尾。
+
+现在折行时把违规的邻居一起带到下一行。折行函数从匿名 namespace 提出来成为
+`wrapPoemText`，这样规则可以脱离渲染单独测。
+
+**测试自带判别力证明**：`wrapHonoursChineseLineBreakingRules` 在断言之前，先用同一输入
+在测试里复现一遍"朴素按宽切分"，并断言朴素版本**确实**会把标点甩到行首。
+这样如果将来有人改了算法或换了输入文本导致用例失去检测能力，测试会直接报
+"the assertions below are vacuous"，而不是悄悄变成永真。
+
+### 双诗体裁
+
+酬答、唱和、问答一类作品**由两首诗组成**，原模型只有单个标题/作者/朝代/正文，装不下。
+
+**数据模型**（`models.h`）：`Poem` 增加 `secondTitle / secondAuthor / secondDynasty / secondContent`
+与 `relation`（`""` 单首、`gift` 赠答、`harmony` 唱和、`qa` 问答），`isPaired()` 由下首正文是否非空推导。
+
+两个刻意的取舍：
+- 新字段**放在 `enabled` 之后**，不打断既有的按位置聚合初始化 —— 否则 `defaultPoems()`
+  和一批测试的 `{id, title, author, dynasty, content, {tags}, true}` 全部要改。
+- `poemToJson` 只在真的成对时才写下首字段，单首诗词的配置不会被四五个空串污染。
+  因此**旧 `config.json` 无需迁移**，读进来即单首。
+
+**渲染**（`renderer.cpp`）：`TypographyLayout`/`buildLayout` 重构为 `PoemPart`/`BlockLayout`/`buildBlock`，
+新增 `poemParts()` 负责把一首诗拆成 1 或 2 个块，绘制逻辑抽成 `drawBlock`。
+每块可带一行关系标签（赠／酬、原唱／奉和、问／答），块间用 `pairSpacing` 隔开。
+逐级缩小与"放不下就报错"的策略现在对**多块合计高度**生效，单块逻辑不变。
+
+`drawBlock` 的高度推进与 `buildBlock` 的高度计算逐条对应（同一个 `placed` 标志、同样的间距序列），
+避免测量与绘制漂移 —— 这是这类手工排版代码最容易出的错。
+
+**设置项**：`RenderSettings` 增加 `pairSpacing`（默认 36 px，随分辨率缩放）与
+`relationTagEnabled`（默认开），配置读写带 clamp。
+
+**界面**：
+- 诗词库表格加第 5 列「形式」（单首／赠答／唱和／问答／双首），成对的标蓝；
+  标题列显示 `上首 ↔ 下首`，作者列与摘要列同理合并呈现
+- 编辑对话框改为「体裁」下拉 + 上首 / 下首两个分组；选单首时下首组禁用，
+  且**保存时会清空下首字段**，避免留下看不见的半首；选酬答类而下首正文为空会被拦下
+- 显示设置「版面」卡加「双诗间隔」与「双诗显示酬答标签」
+- 预览摘要一行内展示两首的标题与作者
+
+**新增测试** 3 项：`rendererDrawsBothHalvesOfAPairedPoem`（成对渲染的墨迹像素须显著多于单首，
+否则说明下首没画）、`relationTagCanBeTurnedOff`（开关标签必须改变像素）、
+`pairedPoemSurvivesConfigRoundTrip`（含 `relationLabels` 正确性）。
+
+**验证**：`poetry_tests` 26 项、`poetry_ui_tests` 7 项全过，无 error / 无 warning。
+单首渲染路径由原有 23 项测试保持不变，即**零回归**。
+
+> 双诗的**观感**（两块的比例、标签的分量、间隔是否合适）无法自动断言，
+> 需要生成一张实际壁纸来判读 —— 已在 README 留了验证路径。
+
+---
+
 ## 2026-09-26 — 内存调查：没有泄漏，但纠正了我自己的误判，并提速 27%
 
 **起因**：我先前用 `tasklist` 看到进程涨到 242 MB，怀疑泄漏，还把它列为"规范 P0 判据未过"。

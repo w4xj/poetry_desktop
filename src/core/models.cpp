@@ -39,6 +39,15 @@ Anchor anchorFromString(const QString &value) {
     return Anchor::BottomRight;
 }
 
+QPair<QString, QString> relationLabels(const QString &relation) {
+    const QString key = relation.trimmed().toLower();
+    if (key == QStringLiteral("gift")) return {QStringLiteral("赠"), QStringLiteral("酬")};
+    if (key == QStringLiteral("harmony")) return {QStringLiteral("原唱"), QStringLiteral("奉和")};
+    if (key == QStringLiteral("qa")) return {QStringLiteral("问"), QStringLiteral("答")};
+    if (!key.isEmpty()) return {QStringLiteral("上首"), QStringLiteral("下首")};
+    return {};
+}
+
 QJsonObject poemToJson(const Poem &poem) {
     QJsonObject object;
     object.insert(QStringLiteral("id"), poem.id);
@@ -46,6 +55,14 @@ QJsonObject poemToJson(const Poem &poem) {
     object.insert(QStringLiteral("author"), poem.author);
     object.insert(QStringLiteral("dynasty"), poem.dynasty);
     object.insert(QStringLiteral("content"), poem.content);
+    // Only write the paired half when it exists, so single poems stay compact.
+    if (poem.isPaired() || !poem.secondTitle.trimmed().isEmpty()) {
+        object.insert(QStringLiteral("secondTitle"), poem.secondTitle);
+        object.insert(QStringLiteral("secondAuthor"), poem.secondAuthor);
+        object.insert(QStringLiteral("secondDynasty"), poem.secondDynasty);
+        object.insert(QStringLiteral("secondContent"), poem.secondContent);
+    }
+    if (!poem.relation.trimmed().isEmpty()) object.insert(QStringLiteral("relation"), poem.relation);
     QJsonArray tags;
     for (const QString &tag : poem.tags) tags.append(tag);
     object.insert(QStringLiteral("tags"), tags);
@@ -70,6 +87,12 @@ Poem poemFromJson(const QJsonObject &object, QString *error) {
         return fail(QStringLiteral("dynasty 必须是字符串"));
     if (!object.value(QStringLiteral("content")).isString())
         return fail(QStringLiteral("content 必须是字符串"));
+    for (const QString &key : {QStringLiteral("secondTitle"), QStringLiteral("secondAuthor"),
+                               QStringLiteral("secondDynasty"), QStringLiteral("secondContent"),
+                               QStringLiteral("relation")}) {
+        if (!object.value(key).isUndefined() && !object.value(key).isString())
+            return fail(QStringLiteral("%1 必须是字符串").arg(key));
+    }
     if (!object.value(QStringLiteral("tags")).isUndefined() && !object.value(QStringLiteral("tags")).isArray())
         return fail(QStringLiteral("tags 必须是数组"));
     if (!object.value(QStringLiteral("enabled")).isUndefined() && !object.value(QStringLiteral("enabled")).isBool())
@@ -80,6 +103,11 @@ Poem poemFromJson(const QJsonObject &object, QString *error) {
     poem.author = object.value(QStringLiteral("author")).toString();
     poem.dynasty = object.value(QStringLiteral("dynasty")).toString();
     poem.content = object.value(QStringLiteral("content")).toString().trimmed();
+    poem.secondTitle = object.value(QStringLiteral("secondTitle")).toString().trimmed();
+    poem.secondAuthor = object.value(QStringLiteral("secondAuthor")).toString().trimmed();
+    poem.secondDynasty = object.value(QStringLiteral("secondDynasty")).toString().trimmed();
+    poem.secondContent = object.value(QStringLiteral("secondContent")).toString().trimmed();
+    poem.relation = object.value(QStringLiteral("relation")).toString().trimmed().toLower();
     poem.enabled = object.value(QStringLiteral("enabled")).toBool(true);
     for (const QJsonValue &tag : object.value(QStringLiteral("tags")).toArray()) {
         if (tag.isString()) poem.tags.append(tag.toString());

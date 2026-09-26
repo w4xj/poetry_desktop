@@ -175,6 +175,8 @@ private:
     QPushButton *m_panelColorButton = nullptr;
     QCheckBox *m_panelCheck = nullptr;
     QCheckBox *m_shadowCheck = nullptr;
+    QCheckBox *m_relationTagCheck = nullptr;
+    QSpinBox *m_pairSpacingSpin = nullptr;
     QCheckBox *m_scheduleCheck = nullptr;
     QSpinBox *m_intervalSpin = nullptr;
 

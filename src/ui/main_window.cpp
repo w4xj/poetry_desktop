@@ -74,6 +74,24 @@ QWidget *makeTabPage(QTabWidget *tabs, const QString &title) {
     return content;
 }
 QString imageFilter() { return QStringLiteral("图片 (*.png *.jpg *.jpeg *.bmp *.webp)"); }
+
+QString poemFormLabel(const Poem &poem) {
+    if (!poem.isPaired()) return QStringLiteral("单首");
+    const QString key = poem.relation.toLower();
+    if (key == QLatin1String("gift")) return QStringLiteral("赠答");
+    if (key == QLatin1String("harmony")) return QStringLiteral("唱和");
+    if (key == QLatin1String("qa")) return QStringLiteral("问答");
+    return QStringLiteral("双首");
+}
+
+// The relation choices, in the order the editor combo shows them.
+struct RelationChoice { const char *value; const char *label; };
+const RelationChoice kRelationChoices[] = {
+    {"", "单首"},
+    {"gift", "赠答（一赠一酬）"},
+    {"harmony", "唱和（原唱·奉和）"},
+    {"qa", "问答（一问一答）"},
+};
 }
 
 MainWindow::MainWindow(QWidget *parent)
@@ -381,13 +399,15 @@ void MainWindow::setupUi() {
     poemRoot->addLayout(poemToolbar);
     m_poemTable = new QTableWidget(poemPage);
     m_poemTable->setObjectName(QStringLiteral("poemTable"));
-    m_poemTable->setColumnCount(4);
-    m_poemTable->setHorizontalHeaderLabels({QStringLiteral("启用"), QStringLiteral("标题"), QStringLiteral("作者"), QStringLiteral("正文摘要")});
+    m_poemTable->setColumnCount(5);
+    m_poemTable->setHorizontalHeaderLabels({QStringLiteral("启用"), QStringLiteral("标题"), QStringLiteral("作者"),
+                                            QStringLiteral("正文摘要"), QStringLiteral("形式")});
     m_poemTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_poemTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_poemTable->verticalHeader()->setDefaultSectionSize(32);
     m_poemTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_poemTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    m_poemTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     poemRoot->addWidget(m_poemTable, 1);
     m_poemCountLabel = new QLabel(poemPage);
     m_poemCountLabel->setObjectName(QStringLiteral("poemCountLabel"));
@@ -433,6 +453,12 @@ void MainWindow::setupUi() {
     m_panelColorButton->setObjectName(QStringLiteral("panelColorButton"));
     m_shadowCheck = new QCheckBox(QStringLiteral("文字阴影"), displayPage);
     m_shadowCheck->setObjectName(QStringLiteral("shadowCheckBox"));
+    m_relationTagCheck = new QCheckBox(QStringLiteral("双诗显示酬答标签"), displayPage);
+    m_relationTagCheck->setObjectName(QStringLiteral("relationTagCheckBox"));
+    m_pairSpacingSpin = new QSpinBox(displayPage);
+    m_pairSpacingSpin->setObjectName(QStringLiteral("pairSpacingSpinBox"));
+    m_pairSpacingSpin->setRange(0, 400);
+    m_pairSpacingSpin->setSuffix(QStringLiteral(" px"));
     auto *typeCard = new QGroupBox(QStringLiteral("排版"), displayPage);
     auto *typeForm = new QFormLayout(typeCard);
     typeForm->addRow(QStringLiteral("字体族"), m_fontCombo);
@@ -470,6 +496,9 @@ void MainWindow::setupUi() {
     panelRow->addStretch();
     layoutForm->addRow(QStringLiteral("文字底板"), panelRow);
     layoutForm->addRow(QString(), m_shadowCheck);
+    layoutForm->addRow(QStringLiteral("双诗间隔"), m_pairSpacingSpin);
+    layoutForm->addRow(QString(), m_relationTagCheck);
+    layoutForm->addRow(QStringLiteral("提示"), new QLabel(QStringLiteral("双诗间隔与酬答标签只在酬答／唱和／问答体裁下生效。"), displayPage));
     displayRoot->addWidget(layoutCard);
 
     auto *displayHint = new QLabel(QStringLiteral("改动会在约 220 ms 后刷新左侧预览，不会自动修改桌面。"), displayPage);
@@ -550,6 +579,8 @@ void MainWindow::setupUi() {
     connect(m_fontSizeSpin, &QSpinBox::valueChanged, this, &MainWindow::displaySettingsChanged);
     connect(m_panelCheck, &QCheckBox::toggled, this, &MainWindow::displaySettingsChanged);
     connect(m_shadowCheck, &QCheckBox::toggled, this, &MainWindow::displaySettingsChanged);
+    connect(m_relationTagCheck, &QCheckBox::toggled, this, &MainWindow::displaySettingsChanged);
+    connect(m_pairSpacingSpin, &QSpinBox::valueChanged, this, &MainWindow::displaySettingsChanged);
     connect(m_anchorCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::displaySettingsChanged);
     connect(m_fitCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::displaySettingsChanged);
     connect(resetDisplayButton, &QPushButton::clicked, this, &MainWindow::resetDisplaySettings);
@@ -706,11 +737,28 @@ void MainWindow::updatePoemUi() {
         enabled->setCheckState(poem.enabled ? Qt::Checked : Qt::Unchecked);
         enabled->setData(Qt::UserRole, poem.id);
         m_poemTable->setItem(row, 0, enabled);
-        m_poemTable->setItem(row, 1, new QTableWidgetItem(poem.title));
-        m_poemTable->setItem(row, 2, new QTableWidgetItem(poem.author));
+        QString title = poem.title;
+        if (poem.isPaired()) {
+            const QString second = poem.secondTitle.isEmpty() ? poem.secondContent.left(8) : poem.secondTitle;
+            title = QStringLiteral("%1 ↔ %2").arg(poem.title, second);
+        }
+        m_poemTable->setItem(row, 1, new QTableWidgetItem(title));
+        QString author = poem.author;
+        if (poem.isPaired() && !poem.secondAuthor.isEmpty()) {
+            author = QStringLiteral("%1 / %2").arg(poem.author, poem.secondAuthor);
+        }
+        m_poemTable->setItem(row, 2, new QTableWidgetItem(author));
         QString content = poem.content;
         content.replace(QStringLiteral("\n"), QStringLiteral(" / "));
+        if (poem.isPaired()) {
+            QString secondContent = poem.secondContent;
+            secondContent.replace(QStringLiteral("\n"), QStringLiteral(" / "));
+            content += QStringLiteral(" ↔ ") + secondContent;
+        }
         m_poemTable->setItem(row, 3, new QTableWidgetItem(content));
+        auto *formItem = new QTableWidgetItem(poemFormLabel(poem));
+        if (poem.isPaired()) formItem->setForeground(QColor(QStringLiteral("#1d4ed8")));
+        m_poemTable->setItem(row, 4, formItem);
         if (poem.enabled) ++enabledCount;
         if (poem.id == m_previewPoem.id) selectedRow = row;
     }
@@ -758,6 +806,10 @@ void MainWindow::updateSettingsUi() {
     m_panelColorButton->setStyleSheet(colorButtonStyle(m_config.render.panelColor));
     m_panelCheck->setChecked(m_config.render.panelEnabled);
     m_shadowCheck->setChecked(m_config.render.shadowEnabled);
+    const QSignalBlocker b15(m_relationTagCheck);
+    const QSignalBlocker b16(m_pairSpacingSpin);
+    m_relationTagCheck->setChecked(m_config.render.relationTagEnabled);
+    m_pairSpacingSpin->setValue(m_config.render.pairSpacing);
     m_anchorCombo->setCurrentIndex(m_anchorCombo->findData(anchorToString(m_config.render.anchor)));
     m_fitCombo->setCurrentIndex(m_fitCombo->findData(fitModeToString(m_config.render.fitMode)));
     const QSignalBlocker b12(m_scheduleCheck);
@@ -824,6 +876,11 @@ void MainWindow::updatePreviewSummary() {
     QStringList parts;
     parts << poemTitle;
     if (!m_previewPoem.author.isEmpty()) parts << m_previewPoem.author;
+    if (m_previewPoem.isPaired()) {
+        parts << QStringLiteral("↔");
+        parts << (m_previewPoem.secondTitle.isEmpty() ? m_previewPoem.secondContent.left(12) : m_previewPoem.secondTitle);
+        if (!m_previewPoem.secondAuthor.isEmpty()) parts << m_previewPoem.secondAuthor;
+    }
     parts << imageName;
     m_previewContentLabel->setText(QStringLiteral("当前预览：%1").arg(parts.join(QStringLiteral(" · "))));
     m_previewContentLabel->setToolTip(m_previewImage.path);
@@ -967,42 +1024,95 @@ void MainWindow::setSelectedImageWallpaper() {
 
 bool MainWindow::editPoemDialog(Poem &poem, bool creating) {
     QDialog dialog(this);
-    dialog.setWindowTitle(creating ? QStringLiteral("\u65b0\u589e\u8bd7\u8bcd") : QStringLiteral("\u7f16\u8f91\u8bd7\u8bcd"));
-    dialog.setMinimumSize(560, 440);
+    dialog.setWindowTitle(creating ? QStringLiteral("新增诗词") : QStringLiteral("编辑诗词"));
+    dialog.setMinimumSize(620, 640);
     auto *layout = new QVBoxLayout(&dialog);
+
+    const auto isPairedChoice = [](const QComboBox *combo) { return !combo->currentData().toString().isEmpty(); };
+
     auto *form = new QFormLayout();
-    auto *titleEdit = new QLineEdit(poem.title, &dialog);
-    auto *authorEdit = new QLineEdit(poem.author, &dialog);
-    auto *dynastyEdit = new QLineEdit(poem.dynasty, &dialog);
-    auto *contentEdit = new QTextEdit(poem.content, &dialog);
-    contentEdit->setMinimumHeight(190);
-    contentEdit->setPlaceholderText(QStringLiteral("\u6b63\u6587\u652f\u6301\u6362\u884c\uff0c\u6bcf\u884c\u4f1a\u6309\u58c1\u7eb8\u5b89\u5168\u533a\u57df\u81ea\u52a8\u6362\u884c\u3002"));
-    form->addRow(QStringLiteral("\u6807\u9898"), titleEdit);
-    form->addRow(QStringLiteral("\u4f5c\u8005"), authorEdit);
-    form->addRow(QStringLiteral("\u671d\u4ee3"), dynastyEdit);
-    form->addRow(QStringLiteral("\u6b63\u6587"), contentEdit);
+    auto *relationCombo = new QComboBox(&dialog);
+    relationCombo->setObjectName(QStringLiteral("relationComboBox"));
+    for (const RelationChoice &choice : kRelationChoices) {
+        relationCombo->addItem(QString::fromUtf8(choice.label), QString::fromLatin1(choice.value));
+    }
+    relationCombo->setCurrentIndex(qMax(0, relationCombo->findData(poem.relation)));
+    form->addRow(QStringLiteral("体裁"), relationCombo);
     layout->addLayout(form);
-    auto *hint = new QLabel(QStringLiteral("\u5efa\u8bae\u586b\u5199\u6807\u9898\u3001\u4f5c\u8005\u548c\u671d\u4ee3\uff1b\u6b63\u6587\u4e0d\u80fd\u4e3a\u7a7a\u3002\u6807\u9898\u3001\u4f5c\u8005\uff0f\u671d\u4ee3\u3001\u6b63\u6587\u4f1a\u4f7f\u7528\u4e0d\u540c\u5b57\u53f7\u548c\u989c\u8272\u3002"), &dialog);
+
+    auto *firstGroup = new QGroupBox(QStringLiteral("上首"), &dialog);
+    auto *firstForm = new QFormLayout(firstGroup);
+    auto *titleEdit = new QLineEdit(poem.title, firstGroup);
+    auto *authorEdit = new QLineEdit(poem.author, firstGroup);
+    auto *dynastyEdit = new QLineEdit(poem.dynasty, firstGroup);
+    auto *contentEdit = new QTextEdit(poem.content, firstGroup);
+    contentEdit->setMinimumHeight(150);
+    contentEdit->setPlaceholderText(QStringLiteral("正文支持换行，每行会按壁纸安全区域自动换行。"));
+    firstForm->addRow(QStringLiteral("标题"), titleEdit);
+    firstForm->addRow(QStringLiteral("作者"), authorEdit);
+    firstForm->addRow(QStringLiteral("朝代"), dynastyEdit);
+    firstForm->addRow(QStringLiteral("正文"), contentEdit);
+    layout->addWidget(firstGroup);
+
+    auto *secondGroup = new QGroupBox(QStringLiteral("下首"), &dialog);
+    auto *secondForm = new QFormLayout(secondGroup);
+    auto *secondTitleEdit = new QLineEdit(poem.secondTitle, secondGroup);
+    auto *secondAuthorEdit = new QLineEdit(poem.secondAuthor, secondGroup);
+    auto *secondDynastyEdit = new QLineEdit(poem.secondDynasty, secondGroup);
+    auto *secondContentEdit = new QTextEdit(poem.secondContent, secondGroup);
+    secondContentEdit->setMinimumHeight(150);
+    secondForm->addRow(QStringLiteral("标题"), secondTitleEdit);
+    secondForm->addRow(QStringLiteral("作者"), secondAuthorEdit);
+    secondForm->addRow(QStringLiteral("朝代"), secondDynastyEdit);
+    secondForm->addRow(QStringLiteral("正文"), secondContentEdit);
+    layout->addWidget(secondGroup);
+    secondGroup->setEnabled(isPairedChoice(relationCombo));
+    connect(relationCombo, &QComboBox::currentIndexChanged, &dialog,
+            [relationCombo, secondGroup, isPairedChoice](int) {
+                secondGroup->setEnabled(isPairedChoice(relationCombo));
+            });
+
+    auto *hint = new QLabel(QStringLiteral("建议填写标题、作者和朝代；正文不能为空。标题、作者／朝代、正文会使用不同字号和颜色。"
+                                          "选酬答类体裁时，壁纸会分上下两块展示，并各自标出「赠／酬」一类关系标签。"), &dialog);
     hint->setWordWrap(true);
     hint->setStyleSheet(QStringLiteral("color:#5b6b7b;"));
     layout->addWidget(hint);
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("\u4fdd\u5b58"));
-    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("\u53d6\u6d88"));
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("保存"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
     layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, contentEdit] {
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, relationCombo, contentEdit, secondContentEdit] {
         if (contentEdit->toPlainText().trimmed().isEmpty()) {
-            QMessageBox::warning(&dialog, QStringLiteral("\u65e0\u6cd5\u4fdd\u5b58"), QStringLiteral("\u8bd7\u8bcd\u6b63\u6587\u4e0d\u80fd\u4e3a\u7a7a\u3002"));
+            QMessageBox::warning(&dialog, QStringLiteral("无法保存"), QStringLiteral("诗词正文不能为空。"));
+            return;
+        }
+        if (!relationCombo->currentData().toString().isEmpty() && secondContentEdit->toPlainText().trimmed().isEmpty()) {
+            QMessageBox::warning(&dialog, QStringLiteral("无法保存"), QStringLiteral("酬答类体裁需要填写下首正文，或把体裁改回「单首」。"));
             return;
         }
         dialog.accept();
     });
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) return false;
+
+    poem.relation = relationCombo->currentData().toString();
     poem.title = titleEdit->text().trimmed();
     poem.author = authorEdit->text().trimmed();
     poem.dynasty = dynastyEdit->text().trimmed();
     poem.content = contentEdit->toPlainText().trimmed();
+    if (poem.relation.isEmpty()) {
+        // Dropping back to 单首 must not leave a hidden second half behind.
+        poem.secondTitle.clear();
+        poem.secondAuthor.clear();
+        poem.secondDynasty.clear();
+        poem.secondContent.clear();
+    } else {
+        poem.secondTitle = secondTitleEdit->text().trimmed();
+        poem.secondAuthor = secondAuthorEdit->text().trimmed();
+        poem.secondDynasty = secondDynastyEdit->text().trimmed();
+        poem.secondContent = secondContentEdit->toPlainText().trimmed();
+    }
     if (poem.id.isEmpty()) poem.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     poem.enabled = true;
     return true;
@@ -1409,6 +1519,8 @@ void MainWindow::displaySettingsChanged() {
     if (panelColor.isValid()) m_config.render.panelColor = panelColor;
     m_config.render.panelEnabled = m_panelCheck->isChecked();
     m_config.render.shadowEnabled = m_shadowCheck->isChecked();
+    m_config.render.relationTagEnabled = m_relationTagCheck->isChecked();
+    m_config.render.pairSpacing = m_pairSpacingSpin->value();
     m_config.render.anchor = anchorFromString(m_anchorCombo->currentData().toString());
     m_config.render.fitMode = fitModeFromString(m_fitCombo->currentData().toString());
     persistConfig();

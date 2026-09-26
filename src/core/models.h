@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QSize>
 #include <QJsonObject>
+#include <QPair>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -19,6 +20,10 @@ FitMode fitModeFromString(const QString &value);
 QString anchorToString(Anchor anchor);
 Anchor anchorFromString(const QString &value);
 
+// The two headings that mark which half of a paired poem is which, e.g. 赠 / 酬.
+// Returns empty strings for a single poem.
+QPair<QString, QString> relationLabels(const QString &relation);
+
 struct Poem {
     QString id;
     QString title;
@@ -27,6 +32,17 @@ struct Poem {
     QString content;
     QStringList tags;
     bool enabled = true;
+
+    // 酬答、唱和、问答一类体裁由两首组成：上首走上面那组字段，下首走这组。
+    // 放在末尾是为了不打断既有的按位置聚合初始化。
+    QString secondTitle;
+    QString secondAuthor;
+    QString secondDynasty;
+    QString secondContent;
+    // "" 单首；gift 赠答；harmony 唱和；qa 问答。
+    QString relation;
+
+    bool isPaired() const { return !secondContent.trimmed().isEmpty(); }
 };
 
 struct ImageSource {
@@ -71,6 +87,11 @@ struct RenderSettings {
     int titleMetadataSpacing = 12;
     int metadataContentSpacing = 24;
     int metadataInlineSpacing = 10;
+
+    // Paired poems (酬答/唱和/问答) stack two blocks; these govern the gap between
+    // them and whether each block is headed by its 赠/酬 style tag.
+    int pairSpacing = 36;
+    bool relationTagEnabled = true;
 
     bool panelEnabled = true;
     QColor panelColor = QColor(0, 0, 0, 153);

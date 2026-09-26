@@ -43,7 +43,18 @@ WrappedText makeWrapped(const QString &text, const QFont &font, const QColor &co
     return wrapped;
 }
 
-struct TypographyLayout {
+// One half of what gets rendered. A single poem yields one part; a 酬答/唱和/问答
+// poem yields two, each carrying its own heading tag.
+struct PoemPart {
+    QString tag;
+    QString title;
+    QString author;
+    QString dynasty;
+    QString content;
+};
+
+struct BlockLayout {
+    WrappedText tag;
     WrappedText title;
     WrappedText author;
     WrappedText dynasty;
@@ -56,9 +67,9 @@ struct TypographyLayout {
     int totalHeight = 0;
 };
 
-TypographyLayout buildLayout(const Poem &poem, const RenderSettings &settings,
-                             const QString &family, int maxWidth, int basePointSize) {
-    TypographyLayout layout;
+BlockLayout buildBlock(const PoemPart &part, const RenderSettings &settings,
+                       const QString &family, int maxWidth, int basePointSize) {
+    BlockLayout layout;
     const int titleSize = qBound(10, qRound(basePointSize * settings.titleScale), 180);
     const int authorSize = qBound(8, qRound(basePointSize * settings.authorScale), 120);
     const int dynastySize = qBound(8, qRound(basePointSize * settings.dynastyScale), 120);
@@ -83,13 +94,15 @@ TypographyLayout buildLayout(const Poem &poem, const RenderSettings &settings,
     contentFont.setWeight(QFont::Normal);
     contentFont.setStyleStrategy(QFont::PreferAntialias);
 
-    if (!poem.title.trimmed().isEmpty())
-        layout.title = makeWrapped(poem.title.trimmed(), titleFont, settings.titleColor, maxWidth, 1.10);
-    if (!poem.author.trimmed().isEmpty())
-        layout.author = makeWrapped(poem.author.trimmed(), authorFont, settings.metadataColor, maxWidth, 1.10);
-    if (!poem.dynasty.trimmed().isEmpty())
-        layout.dynasty = makeWrapped(poem.dynasty.trimmed(), dynastyFont, settings.dynastyColor, maxWidth, 1.10);
-    layout.content = makeWrapped(poem.content.trimmed(), contentFont,
+    if (!part.tag.trimmed().isEmpty())
+        layout.tag = makeWrapped(part.tag.trimmed(), authorFont, settings.metadataColor, maxWidth, 1.10);
+    if (!part.title.trimmed().isEmpty())
+        layout.title = makeWrapped(part.title.trimmed(), titleFont, settings.titleColor, maxWidth, 1.10);
+    if (!part.author.trimmed().isEmpty())
+        layout.author = makeWrapped(part.author.trimmed(), authorFont, settings.metadataColor, maxWidth, 1.10);
+    if (!part.dynasty.trimmed().isEmpty())
+        layout.dynasty = makeWrapped(part.dynasty.trimmed(), dynastyFont, settings.dynastyColor, maxWidth, 1.10);
+    layout.content = makeWrapped(part.content.trimmed(), contentFont,
                                  settings.contentColor.isValid() ? settings.contentColor : settings.textColor,
                                  maxWidth, qMax<qreal>(1.0, settings.contentLineSpacing));
 
@@ -117,7 +130,12 @@ TypographyLayout buildLayout(const Poem &poem, const RenderSettings &settings,
             + (hasDynasty ? layout.dynasty.height : 0);
     }
 
+    if (!layout.tag.isEmpty()) {
+        layout.totalWidth = qMax(layout.totalWidth, layout.tag.width);
+        layout.totalHeight += layout.tag.height;
+    }
     if (!layout.title.isEmpty()) {
+        if (layout.totalHeight > 0) layout.totalHeight += qMax(4, settings.titleMetadataSpacing / 2);
         layout.totalWidth = qMax(layout.totalWidth, layout.title.width);
         layout.totalHeight += layout.title.height;
     }
@@ -136,6 +154,32 @@ TypographyLayout buildLayout(const Poem &poem, const RenderSettings &settings,
     }
     return layout;
 }
+
+// Splits a poem into the one or two blocks the renderer has to place.
+QVector<PoemPart> poemParts(const Poem &poem, const RenderSettings &settings) {
+    const QPair<QString, QString> labels = relationLabels(poem.relation);
+    QVector<PoemPart> parts;
+
+    PoemPart first;
+    first.tag = settings.relationTagEnabled ? labels.first : QString();
+    first.title = poem.title;
+    first.author = poem.author;
+    first.dynasty = poem.dynasty;
+    first.content = poem.content;
+    parts.append(first);
+
+    if (poem.isPaired()) {
+        PoemPart second;
+        second.tag = settings.relationTagEnabled ? labels.second : QString();
+        second.title = poem.secondTitle;
+        second.author = poem.secondAuthor;
+        second.dynasty = poem.secondDynasty;
+        second.content = poem.secondContent;
+        parts.append(second);
+    }
+    return parts;
+}
+
 
 void drawWrapped(QPainter &painter, const WrappedText &text, int x, int y, bool shadowEnabled) {
     if (text.isEmpty()) return;
@@ -158,8 +202,48 @@ void drawWrapped(QPainter &painter, const WrappedText &text, int x, int y, bool 
     }
 }
 
-QString resolveFontFamily(const QString &requested, QString *warning) {
-    const QStringList families = QFontDatabase().families();
+// Advances exactly the pixels buildBlock measured, so layout and painting cannot
+// drift apart when a block grows a tag or a second half.
+void drawBlock(QPainter &painter, const BlockLayout &block, int x, int y, const RenderSettings &effective) {
+    bool placed = false;
+    if (!block.tag.isEmpty()) {
+        drawWrapped(painter, block.tag, x, y, effective.shadowEnabled);
+        y += block.tag.height;
+        placed = true;
+    }
+    if (!block.title.isEmpty()) {
+        if (placed) y += qMax(4, effective.titleMetadataSpacing / 2);
+        drawWrapped(painter, block.title, x, y, effective.shadowEnabled);
+        y += block.title.height;
+        placed = true;
+    }
+    if (block.metadataHeight > 0) {
+        if (placed) y += effective.titleMetadataSpacing;
+        if (block.metadataInline) {
+            const int markX = x + block.author.width + effective.metadataInlineSpacing;
+            drawWrapped(painter, block.author, x, y, effective.shadowEnabled);
+            drawWrapped(painter, block.separator, markX, y, effective.shadowEnabled);
+            drawWrapped(painter, block.dynasty, markX + block.separator.width + effective.metadataInlineSpacing,
+                        y, effective.shadowEnabled);
+        } else {
+            int cursor = y;
+            if (!block.author.isEmpty()) {
+                drawWrapped(painter, block.author, x, cursor, effective.shadowEnabled);
+                cursor += block.author.height;
+                if (!block.dynasty.isEmpty()) cursor += effective.metadataInlineSpacing;
+            }
+            if (!block.dynasty.isEmpty()) drawWrapped(painter, block.dynasty, x, cursor, effective.shadowEnabled);
+        }
+        y += block.metadataHeight;
+        placed = true;
+    }
+    if (!block.content.isEmpty()) {
+        if (placed) y += block.metadataHeight > 0 ? effective.metadataContentSpacing : effective.titleMetadataSpacing;
+        drawWrapped(painter, block.content, x, y, effective.shadowEnabled);
+    }
+}
+
+QString resolveFontFamily(const QString &requested, QString *warning) {    const QStringList families = QFontDatabase().families();
     const QString requestedTrimmed = requested.trimmed();
     if (!requestedTrimmed.isEmpty() && families.contains(requestedTrimmed)) return requestedTrimmed;
 
@@ -292,12 +376,26 @@ QImage WallpaperRenderer::render(const QImage &source, const Poem &poem, const R
     effective.titleMetadataSpacing = qMax(4, qRound(settings.titleMetadataSpacing * resolutionScale));
     effective.metadataContentSpacing = qMax(6, qRound(settings.metadataContentSpacing * resolutionScale));
     effective.metadataInlineSpacing = qMax(4, qRound(settings.metadataInlineSpacing * resolutionScale));
-    TypographyLayout layout;
+    effective.pairSpacing = qMax(8, qRound(settings.pairSpacing * resolutionScale));
+
+    const QVector<PoemPart> parts = poemParts(poem, effective);
+    QVector<BlockLayout> blocks;
+    int combinedWidth = 0;
+    int combinedHeight = 0;
     bool fits = false;
     const int requestedSize = qBound(10, qRound(settings.fontPointSize * resolutionScale), 180);
     for (int size = requestedSize; size >= 10; --size) {
-        layout = buildLayout(poem, effective, family, maxWidth, size);
-        if (layout.totalHeight <= maxHeight && layout.totalWidth <= maxWidth) {
+        blocks.clear();
+        combinedWidth = 0;
+        combinedHeight = 0;
+        for (const PoemPart &part : parts) {
+            const BlockLayout block = buildBlock(part, effective, family, maxWidth, size);
+            if (combinedHeight > 0) combinedHeight += effective.pairSpacing;
+            combinedHeight += block.totalHeight;
+            combinedWidth = qMax(combinedWidth, block.totalWidth);
+            blocks.append(block);
+        }
+        if (combinedHeight <= maxHeight && combinedWidth <= maxWidth) {
             fits = true;
             break;
         }
@@ -307,7 +405,7 @@ QImage WallpaperRenderer::render(const QImage &source, const Poem &poem, const R
         return {};
     }
 
-    const QSize contentSize(qMax(1, layout.totalWidth), qMax(1, layout.totalHeight));
+    const QSize contentSize(qMax(1, combinedWidth), qMax(1, combinedHeight));
     const QRect positioned = textAreaForAnchor(canvas.size(), effective.anchor, contentSize, margin);
     QRect panelRect = positioned.adjusted(-margin / 2, -margin / 2, margin / 2, margin / 2).intersected(canvas.rect());
     if (effective.panelEnabled) {
@@ -317,32 +415,11 @@ QImage WallpaperRenderer::render(const QImage &source, const Poem &poem, const R
     }
 
     int y = positioned.top();
-    if (!layout.title.isEmpty()) {
-        drawWrapped(painter, layout.title, positioned.left(), y, effective.shadowEnabled);
-        y += layout.title.height;
-        if (layout.metadataHeight > 0 || !layout.content.isEmpty()) y += effective.titleMetadataSpacing;
+    for (int i = 0; i < blocks.size(); ++i) {
+        if (i > 0) y += effective.pairSpacing;
+        drawBlock(painter, blocks.at(i), positioned.left(), y, effective);
+        y += blocks.at(i).totalHeight;
     }
-
-    if (layout.metadataHeight > 0) {
-        if (layout.metadataInline) {
-            const int markX = positioned.left() + layout.author.width + effective.metadataInlineSpacing;
-            drawWrapped(painter, layout.author, positioned.left(), y, effective.shadowEnabled);
-            drawWrapped(painter, layout.separator, markX, y, effective.shadowEnabled);
-            drawWrapped(painter, layout.dynasty, markX + layout.separator.width + effective.metadataInlineSpacing,
-                        y, effective.shadowEnabled);
-        } else {
-            if (!layout.author.isEmpty()) {
-                drawWrapped(painter, layout.author, positioned.left(), y, effective.shadowEnabled);
-                y += layout.author.height;
-                if (!layout.dynasty.isEmpty()) y += effective.metadataInlineSpacing;
-            }
-            if (!layout.dynasty.isEmpty()) drawWrapped(painter, layout.dynasty, positioned.left(), y, effective.shadowEnabled);
-        }
-        y += layout.metadataHeight;
-        if (!layout.content.isEmpty()) y += effective.metadataContentSpacing;
-    }
-
-    if (!layout.content.isEmpty()) drawWrapped(painter, layout.content, positioned.left(), y, effective.shadowEnabled);
     painter.end();
     if (error && !warning.isEmpty()) *error = warning;
     return canvas;
