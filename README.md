@@ -164,6 +164,57 @@ logs/app.log           日志，超过 1MB 轮转为 app.log.1
 只换单一尺寸会让小尺寸重新变糊。`resources/app.rc` 负责把它编进 exe 的 PE 资源，
 `resources.qrc` 负责给运行时用 —— 两处都要动。
 
+## 打包发布
+
+产物是自包含的绿色版目录压缩包，双击 `poetry_desktop.exe` 即可运行，目标机器不需要装 Qt。
+
+```bash
+export PATH="<Qt>/Tools/mingw1310_64/bin:$PATH"      # 需要 g++ / mingw32-make 在 PATH
+cmake -DCMAKE_BUILD_TYPE=Release -G "MinGW Makefiles" -S . -B build/release
+cmake --build build/release --target poetry_desktop -j 10
+cd build/release && cpack -G ZIP
+```
+
+得到 `build/release/poetry_desktop-<版本>-windows-x64.zip`。
+
+### 机制
+
+- 打包规则写在 `CMakeLists.txt` 末尾的 `install()` + `CPack` 段，用 CMake 原生机制，不另维护脚本。
+- `windeployqt` 通过 `install(CODE)` 在**安装阶段**执行。必须如此：它要分析的是暂存目录里的那个 exe，
+  而 CPack 正是先 install 到临时前缀、再把该前缀压成包。失败会以 `FATAL_ERROR` 中断打包，不会静默产出缺 DLL 的包。
+- 包名里的版本号来自 `project(poetry_desktop VERSION ...)`。**改版本只改 `CMakeLists.txt` 第 2 行**，包名自动跟随。
+- 包内附带的用户说明是 `packaging/README.txt`（按钮语义、数据位置、支持边界），与开发者读的这份 README 分开维护。
+- Qt 的 `Concurrent` 在 MinGW 下是静态库，所以包里**没有** `Qt6Concurrent.dll`，这是正常的，不是漏打。
+
+### CLion 里怎么打
+
+CLion 的图形界面不直接驱动 cpack，两种做法：
+
+1. External Tool：Settings → Tools → External Tools，Program 填
+   `<CLion>/bin/cmake/win/x64/bin/cpack.exe`，Arguments 填 `-G ZIP`，
+   Working directory 填 `$ProjectFileDir$/build/release`。
+2. 或直接在 IDE 内置终端跑上面三条命令。
+
+### 每次打包后的验收标准
+
+包必须能在**没装 Qt 的机器**上跑。等价的本地验证是把 PATH 换成只剩系统目录再启动：
+
+```bash
+cd build/verify/poetry_desktop-*-windows-x64      # 先解压
+PATH="C:/Windows/System32;C:/Windows" ./poetry_desktop.exe
+```
+
+判据三条：进程持续存活不闪退、没有缺 DLL 弹窗、
+`tasklist /FI "PID eq <pid>" /M` 能看到它从**自己所在目录**加载了 `Qt6Core/Qt6Gui/Qt6Widgets`。
+
+最近一次实测（2026-09-26）：包 23.5 MB、30 个条目，净化 PATH 下启动后加载 81 个模块，
+含包内自带的 4 个 Qt6 模块，存活无报错。
+
+### 已知缺项
+
+目前是"目录 + zip"的绿色版形态，**没有安装程序**（MSI / NSIS）、没有开机自启、没有代码签名，
+所以首次运行 Windows 会弹 SmartScreen 提示。这些在 `PRODUCT_SPEC.md` 里属于后续版本范围。
+
 ## 故障排查
 
 | 现象 | 原因 / 处理 |

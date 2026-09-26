@@ -102,8 +102,9 @@ endif()
 
 
 
+get_filename_component(POETRY_QT_INSTALL_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
+
 if(WIN32 AND BUILD_TESTING)
-    get_filename_component(POETRY_QT_INSTALL_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
     set_tests_properties(poetry_core_tests PROPERTIES
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         ENVIRONMENT "PATH=${POETRY_QT_INSTALL_PREFIX}/bin;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=${POETRY_QT_INSTALL_PREFIX}/plugins")
@@ -111,5 +112,39 @@ if(WIN32 AND BUILD_TESTING)
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         ENVIRONMENT "PATH=${POETRY_QT_INSTALL_PREFIX}/bin;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=${POETRY_QT_INSTALL_PREFIX}/plugins")
 endif()
+
+# ---------------------------------------------------------------------------
+# Packaging. Build a Release tree, then run `cpack` inside it to get a
+# self-contained, double-clickable folder archive. See README.md "打包发布".
+# ---------------------------------------------------------------------------
+install(TARGETS poetry_desktop RUNTIME DESTINATION ".")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/README.txt" DESTINATION ".")
+
+if(WIN32)
+    # windeployqt must run against the staged copy, so it belongs in the install
+    # step: CPack installs into a scratch prefix and zips that directory.
+    set(POETRY_WINDEPLOYQT "${POETRY_QT_INSTALL_PREFIX}/bin/windeployqt.exe")
+    install(CODE "
+        execute_process(
+            COMMAND \"${POETRY_WINDEPLOYQT}\"
+                --release --no-translations --compiler-runtime
+                \"\${CMAKE_INSTALL_PREFIX}/poetry_desktop.exe\"
+            RESULT_VARIABLE _poetry_deploy_result
+            OUTPUT_QUIET ERROR_QUIET)
+        if(NOT _poetry_deploy_result EQUAL 0)
+            message(FATAL_ERROR \"windeployqt failed with exit code \${_poetry_deploy_result}\")
+        endif()
+    ")
+    set(CPACK_PACKAGE_FILE_NAME "poetry_desktop-${PROJECT_VERSION}-windows-x64")
+endif()
+
+set(CPACK_PACKAGE_NAME "poetry_desktop")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VENDOR "PoetryDesktop")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "本地图片与诗词合成桌面壁纸")
+set(CPACK_GENERATOR ZIP)
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+set(CPACK_VERBATIM_VARIABLES YES)
+include(CPack)
 
 
