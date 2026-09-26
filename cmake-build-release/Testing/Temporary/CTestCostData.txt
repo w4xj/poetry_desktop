@@ -1,3 +1,0 @@
-poetry_core_tests 16 0.310372
-poetry_ui_tests 2 0.227067
----

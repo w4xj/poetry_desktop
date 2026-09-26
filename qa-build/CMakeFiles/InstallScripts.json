@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"E:/cProject/poetry_desktop/qa-build/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
