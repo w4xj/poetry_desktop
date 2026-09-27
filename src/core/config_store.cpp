@@ -50,6 +50,7 @@ QJsonObject renderToJson(const RenderSettings &render) {
         {QStringLiteral("metadataInlineSpacing"), render.metadataInlineSpacing},
         {QStringLiteral("pairSpacing"), render.pairSpacing},
         {QStringLiteral("relationTagEnabled"), render.relationTagEnabled},
+        {QStringLiteral("pairLayoutPanel"), pairLayoutPanelToString(render.pairLayoutPanel)},
         {QStringLiteral("panelEnabled"), render.panelEnabled},
         {QStringLiteral("panelColor"), colorToJson(render.panelColor)},
         {QStringLiteral("shadowEnabled"), render.shadowEnabled},
@@ -95,6 +96,8 @@ void renderFromJson(const QJsonObject &object, RenderSettings &render) {
         render.pairSpacing = qBound(0, object.value(QStringLiteral("pairSpacing")).toInt(), 400);
     if (object.value(QStringLiteral("relationTagEnabled")).isBool())
         render.relationTagEnabled = object.value(QStringLiteral("relationTagEnabled")).toBool();
+    if (object.value(QStringLiteral("pairLayoutPanel")).isString())
+        render.pairLayoutPanel = pairLayoutPanelFromString(object.value(QStringLiteral("pairLayoutPanel")).toString());
 
     if (object.value(QStringLiteral("panelEnabled")).isBool())
         render.panelEnabled = object.value(QStringLiteral("panelEnabled")).toBool();

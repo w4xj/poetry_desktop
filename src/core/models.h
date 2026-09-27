@@ -14,11 +14,16 @@ namespace poetry {
 
 enum class FitMode { Fill, Fit, Stretch };
 enum class Anchor { TopLeft, TopRight, Center, BottomLeft, BottomRight };
+// How the text panel is drawn for a paired poem: one panel around both halves,
+// or a separate panel per half.
+enum class PairLayoutPanel { Merged, Separate };
 
 QString fitModeToString(FitMode mode);
 FitMode fitModeFromString(const QString &value);
 QString anchorToString(Anchor anchor);
 Anchor anchorFromString(const QString &value);
+QString pairLayoutPanelToString(PairLayoutPanel layout);
+PairLayoutPanel pairLayoutPanelFromString(const QString &value);
 
 // The two headings that mark which half of a paired poem is which, e.g. 赠 / 酬.
 // Returns empty strings for a single poem.
@@ -92,6 +97,7 @@ struct RenderSettings {
     // them and whether each block is headed by its 赠/酬 style tag.
     int pairSpacing = 36;
     bool relationTagEnabled = true;
+    PairLayoutPanel pairLayoutPanel = PairLayoutPanel::Merged;
 
     bool panelEnabled = true;
     QColor panelColor = QColor(0, 0, 0, 153);

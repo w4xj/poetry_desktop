@@ -39,8 +39,16 @@ Anchor anchorFromString(const QString &value) {
     return Anchor::BottomRight;
 }
 
-QPair<QString, QString> relationLabels(const QString &relation) {
-    const QString key = relation.trimmed().toLower();
+QString pairLayoutPanelToString(PairLayoutPanel layout) {
+    return layout == PairLayoutPanel::Separate ? QStringLiteral("separate") : QStringLiteral("merged");
+}
+
+PairLayoutPanel pairLayoutPanelFromString(const QString &value) {
+    return value.trimmed().toLower() == QStringLiteral("separate")
+        ? PairLayoutPanel::Separate : PairLayoutPanel::Merged;
+}
+
+QPair<QString, QString> relationLabels(const QString &relation) {    const QString key = relation.trimmed().toLower();
     if (key == QStringLiteral("gift")) return {QStringLiteral("赠"), QStringLiteral("酬")};
     if (key == QStringLiteral("harmony")) return {QStringLiteral("原唱"), QStringLiteral("奉和")};
     if (key == QStringLiteral("qa")) return {QStringLiteral("问"), QStringLiteral("答")};

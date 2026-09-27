@@ -379,6 +379,11 @@ QImage WallpaperRenderer::render(const QImage &source, const Poem &poem, const R
     effective.pairSpacing = qMax(8, qRound(settings.pairSpacing * resolutionScale));
 
     const QVector<PoemPart> parts = poemParts(poem, effective);
+    const int panelPad = margin / 2;
+    // Separate panels each carry their own padding, so the gap between blocks has
+    // to absorb twice that; otherwise the two cards overlap each other.
+    const bool separatePanels = parts.size() > 1 && effective.pairLayoutPanel == PairLayoutPanel::Separate;
+    const int blockGap = separatePanels ? effective.pairSpacing + 2 * panelPad : effective.pairSpacing;
     QVector<BlockLayout> blocks;
     int combinedWidth = 0;
     int combinedHeight = 0;
@@ -390,7 +395,7 @@ QImage WallpaperRenderer::render(const QImage &source, const Poem &poem, const R
         combinedHeight = 0;
         for (const PoemPart &part : parts) {
             const BlockLayout block = buildBlock(part, effective, family, maxWidth, size);
-            if (combinedHeight > 0) combinedHeight += effective.pairSpacing;
+            if (combinedHeight > 0) combinedHeight += blockGap;
             combinedHeight += block.totalHeight;
             combinedWidth = qMax(combinedWidth, block.totalWidth);
             blocks.append(block);
@@ -407,16 +412,27 @@ QImage WallpaperRenderer::render(const QImage &source, const Poem &poem, const R
 
     const QSize contentSize(qMax(1, combinedWidth), qMax(1, combinedHeight));
     const QRect positioned = textAreaForAnchor(canvas.size(), effective.anchor, contentSize, margin);
-    QRect panelRect = positioned.adjusted(-margin / 2, -margin / 2, margin / 2, margin / 2).intersected(canvas.rect());
     if (effective.panelEnabled) {
         painter.setPen(Qt::NoPen);
         painter.setBrush(effective.panelColor);
-        painter.drawRoundedRect(panelRect, qMax(6, margin / 4), qMax(6, margin / 4));
+        const int radius = qMax(6, margin / 4);
+        if (separatePanels) {
+            int cursor = positioned.top();
+            for (const BlockLayout &block : blocks) {
+                const QRect card(QPoint(positioned.left(), cursor), QSize(block.totalWidth, block.totalHeight));
+                painter.drawRoundedRect(card.adjusted(-panelPad, -panelPad, panelPad, panelPad).intersected(canvas.rect()),
+                                       radius, radius);
+                cursor += block.totalHeight + blockGap;
+            }
+        } else {
+            painter.drawRoundedRect(
+                positioned.adjusted(-panelPad, -panelPad, panelPad, panelPad).intersected(canvas.rect()), radius, radius);
+        }
     }
 
     int y = positioned.top();
     for (int i = 0; i < blocks.size(); ++i) {
-        if (i > 0) y += effective.pairSpacing;
+        if (i > 0) y += blockGap;
         drawBlock(painter, blocks.at(i), positioned.left(), y, effective);
         y += blocks.at(i).totalHeight;
     }

@@ -455,6 +455,10 @@ void MainWindow::setupUi() {
     m_shadowCheck->setObjectName(QStringLiteral("shadowCheckBox"));
     m_relationTagCheck = new QCheckBox(QStringLiteral("双诗显示酬答标签"), displayPage);
     m_relationTagCheck->setObjectName(QStringLiteral("relationTagCheckBox"));
+    m_pairLayoutPanelCombo = new QComboBox(displayPage);
+    m_pairLayoutPanelCombo->setObjectName(QStringLiteral("pairLayoutPanelComboBox"));
+    m_pairLayoutPanelCombo->addItem(QStringLiteral("合并为一个面板"), QStringLiteral("merged"));
+    m_pairLayoutPanelCombo->addItem(QStringLiteral("各自独立成面板"), QStringLiteral("separate"));
     m_pairSpacingSpin = new QSpinBox(displayPage);
     m_pairSpacingSpin->setObjectName(QStringLiteral("pairSpacingSpinBox"));
     m_pairSpacingSpin->setRange(0, 400);
@@ -497,6 +501,7 @@ void MainWindow::setupUi() {
     layoutForm->addRow(QStringLiteral("文字底板"), panelRow);
     layoutForm->addRow(QString(), m_shadowCheck);
     layoutForm->addRow(QStringLiteral("双诗间隔"), m_pairSpacingSpin);
+    layoutForm->addRow(QStringLiteral("双诗面板"), m_pairLayoutPanelCombo);
     layoutForm->addRow(QString(), m_relationTagCheck);
     layoutForm->addRow(QStringLiteral("提示"), new QLabel(QStringLiteral("双诗间隔与酬答标签只在酬答／唱和／问答体裁下生效。"), displayPage));
     displayRoot->addWidget(layoutCard);
@@ -581,6 +586,7 @@ void MainWindow::setupUi() {
     connect(m_shadowCheck, &QCheckBox::toggled, this, &MainWindow::displaySettingsChanged);
     connect(m_relationTagCheck, &QCheckBox::toggled, this, &MainWindow::displaySettingsChanged);
     connect(m_pairSpacingSpin, &QSpinBox::valueChanged, this, &MainWindow::displaySettingsChanged);
+    connect(m_pairLayoutPanelCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::displaySettingsChanged);
     connect(m_anchorCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::displaySettingsChanged);
     connect(m_fitCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::displaySettingsChanged);
     connect(resetDisplayButton, &QPushButton::clicked, this, &MainWindow::resetDisplaySettings);
@@ -808,8 +814,11 @@ void MainWindow::updateSettingsUi() {
     m_shadowCheck->setChecked(m_config.render.shadowEnabled);
     const QSignalBlocker b15(m_relationTagCheck);
     const QSignalBlocker b16(m_pairSpacingSpin);
+    const QSignalBlocker b17(m_pairLayoutPanelCombo);
     m_relationTagCheck->setChecked(m_config.render.relationTagEnabled);
     m_pairSpacingSpin->setValue(m_config.render.pairSpacing);
+    m_pairLayoutPanelCombo->setCurrentIndex(
+        qMax(0, m_pairLayoutPanelCombo->findData(pairLayoutPanelToString(m_config.render.pairLayoutPanel))));
     m_anchorCombo->setCurrentIndex(m_anchorCombo->findData(anchorToString(m_config.render.anchor)));
     m_fitCombo->setCurrentIndex(m_fitCombo->findData(fitModeToString(m_config.render.fitMode)));
     const QSignalBlocker b12(m_scheduleCheck);
@@ -1521,6 +1530,7 @@ void MainWindow::displaySettingsChanged() {
     m_config.render.shadowEnabled = m_shadowCheck->isChecked();
     m_config.render.relationTagEnabled = m_relationTagCheck->isChecked();
     m_config.render.pairSpacing = m_pairSpacingSpin->value();
+    m_config.render.pairLayoutPanel = pairLayoutPanelFromString(m_pairLayoutPanelCombo->currentData().toString());
     m_config.render.anchor = anchorFromString(m_anchorCombo->currentData().toString());
     m_config.render.fitMode = fitModeFromString(m_fitCombo->currentData().toString());
     persistConfig();

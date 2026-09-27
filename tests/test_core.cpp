@@ -82,6 +82,7 @@ private slots:
     void rendererDrawsBothHalvesOfAPairedPoem();
     void relationTagCanBeTurnedOff();
     void pairedPoemSurvivesConfigRoundTrip();
+    void pairedPanelSplitsIntoTwoCardsWhenSeparate();
 };
 
 void CoreTests::poemImportAndValidation() {
@@ -772,6 +773,45 @@ void CoreTests::pairedPoemSurvivesConfigRoundTrip() {
     const QPair<QString, QString> labels = relationLabels(loaded.poems.at(1).relation);
     QCOMPARE(labels.first, QStringLiteral("问"));
     QCOMPARE(labels.second, QStringLiteral("答"));
+}
+
+// A merged panel is one contiguous card; separate panels are two cards with
+// background showing through the gap. Count how many times a column that passes
+// only through panel padding enters the panel colour.
+void CoreTests::pairedPanelSplitsIntoTwoCardsWhenSeparate() {
+    const Poem paired = pairedFixture();
+    RenderSettings merged = pairedSettings();
+    merged.panelEnabled = true;
+    merged.panelColor = QColor(255, 0, 255);
+    merged.pairLayoutPanel = PairLayoutPanel::Merged;
+    RenderSettings separate = merged;
+    separate.pairLayoutPanel = PairLayoutPanel::Separate;
+
+    WallpaperRenderer renderer;
+    QString error;
+    const QImage mergedImage = renderer.render(pairedCanvas(), paired, merged, QSize(1400, 1000), &error);
+    QVERIFY2(!mergedImage.isNull(), qPrintable(error));
+    const QImage separateImage = renderer.render(pairedCanvas(), paired, separate, QSize(1400, 1000), &error);
+    QVERIFY2(!separateImage.isNull(), qPrintable(error));
+
+    // margin = max(16, 6% of the 1000px short edge) = 60, panel padding = 30, so
+    // x = 45 sits inside the panel but left of every glyph.
+    const auto panelRuns = [](const QImage &image) {
+        const QColor panel(255, 0, 255);
+        int runs = 0;
+        bool inside = false;
+        for (int y = 0; y < image.height(); ++y) {
+            const bool here = image.pixelColor(45, y) == panel;
+            if (here && !inside) ++runs;
+            inside = here;
+        }
+        return runs;
+    };
+
+    const int mergedRuns = panelRuns(mergedImage);
+    const int separateRuns = panelRuns(separateImage);
+    QCOMPARE(mergedRuns, 1);
+    QCOMPARE(separateRuns, 2);
 }
 
 int main(int argc, char **argv) {
