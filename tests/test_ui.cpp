@@ -5,10 +5,16 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QDir>
+#include <QFile>
+#include <QToolButton>
+#include <QTimer>
+#include <QWizard>
 #include <QtTest>
 
 using namespace poetry;
@@ -21,13 +27,15 @@ private slots:
     void scheduleControlsExposeSafeBounds();
     void layoutKeepsEveryRegionVisibleAndThePreviewDominant();
     void settingsControlsNeverOverlapEachOther();
+    void historyAndExportActionsArePresent();
+    void onboardingAddsSampleImagesWithoutApplying();
 };
 
 // A QFormLayout squeezed for vertical height collapses its rows and paints the
 // labels on top of each other, which no size check catches on its own. Walk each
 // tab page and assert sibling controls keep disjoint rectangles.
 void UiTests::settingsControlsNeverOverlapEachOther() {
-    MainWindow window;
+    MainWindow window(nullptr, false);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
@@ -39,6 +47,18 @@ void UiTests::settingsControlsNeverOverlapEachOther() {
     for (const QSize &canvas : {QSize(1440, 900), QSize(1280, 800), QSize(1024, 700), QSize(900, 640)}) {
         window.resize(canvas);
         QTest::qWait(60);
+
+        // The action bar gained a fifth control in v0.2; at the minimum window
+        // width it must still show the full label rather than clipping it.
+        auto *exportButton = window.findChild<QToolButton *>(QStringLiteral("exportMenuButton"));
+        QVERIFY(exportButton);
+        QVERIFY(exportButton->isVisible());
+        QVERIFY2(exportButton->width() >= exportButton->minimumSizeHint().width(),
+                 qPrintable(QStringLiteral("at %1x%2 the export button is %3 px, needs %4")
+                     .arg(canvas.width()).arg(canvas.height())
+                     .arg(exportButton->width()).arg(exportButton->minimumSizeHint().width())));
+        const QRect exportRect(exportButton->mapTo(&window, QPoint(0, 0)), exportButton->size());
+        QVERIFY2(window.rect().contains(exportRect), "the export button escapes the window");
 
         for (int page = 0; page < tabs->count(); ++page) {
             tabs->setCurrentIndex(page);
@@ -88,14 +108,14 @@ void UiTests::settingsControlsNeverOverlapEachOther() {
 // QStackedWidget only lays out the page that is currently shown, so each tab
 // has to be made current before its children have a meaningful geometry.
 void UiTests::layoutKeepsEveryRegionVisibleAndThePreviewDominant() {
-    MainWindow window;
+    MainWindow window(nullptr, false);
     window.resize(1440, 900);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
 
     auto *tabs = window.findChild<QTabWidget *>(QStringLiteral("resourceSettingsTabs"));
     QVERIFY(tabs);
-    QCOMPARE(tabs->count(), 4);
+    QCOMPARE(tabs->count(), 5);
 
     const QVector<QPair<const char *, QWidget *>> alwaysVisible = {
         {"previewLabel", window.findChild<QLabel *>(QStringLiteral("previewLabel"))},
@@ -134,11 +154,14 @@ void UiTests::layoutKeepsEveryRegionVisibleAndThePreviewDominant() {
         {0, "imageDirectoryList", 120, 70},
         {0, "imageFileList", 120, 90},
         {1, "poemTable", 260, 90},
-        {2, "fontComboBox", 120, 24},
-        {2, "fontSizeSpinBox", 70, 24},
-        {2, "titleColorButton", 60, 24},
-        {3, "intervalSpinBox", 70, 24},
-        {3, "scheduleNextLabel", 80, 12},
+        {2, "historyTable", 260, 90},
+        {2, "historyFilterComboBox", 70, 24},
+        {3, "fontComboBox", 120, 24},
+        {3, "fontSizeSpinBox", 70, 24},
+        {3, "titleColorButton", 60, 24},
+        {4, "intervalSpinBox", 70, 24},
+        {4, "scheduleNextLabel", 80, 12},
+        {4, "autostartCheckBox", 120, 20},
     };
     for (const PageFloor &floor : floors) {
         tabs->setCurrentIndex(floor.tab);
@@ -153,7 +176,7 @@ void UiTests::layoutKeepsEveryRegionVisibleAndThePreviewDominant() {
 }
 
 void UiTests::mainWindowExposesReadablePrimaryActions() {
-    MainWindow window;
+    MainWindow window(nullptr, false);
     // Floor keeps the window usable; the real per-size layout guarantee lives in
     // settingsControlsNeverOverlapEachOther, which measures at each size.
     QVERIFY(window.minimumSize().width() >= 860);
@@ -176,10 +199,38 @@ void UiTests::mainWindowExposesReadablePrimaryActions() {
     QVERIFY(fontSize->minimum() <= 12);
     QVERIFY(fontSize->maximum() >= 100);
     QVERIFY(tabs->count() >= 4);
+    QVERIFY(window.findChild<QTableWidget *>(QStringLiteral("historyTable")));
+    QVERIFY(window.findChild<QToolButton *>(QStringLiteral("exportMenuButton")));
+    QVERIFY(window.findChild<QCheckBox *>(QStringLiteral("autostartCheckBox")));
+}
+
+void UiTests::historyAndExportActionsArePresent() {
+    MainWindow window(nullptr, false);
+    auto *historyTable = window.findChild<QTableWidget *>(QStringLiteral("historyTable"));
+    auto *filter = window.findChild<QComboBox *>(QStringLiteral("historyFilterComboBox"));
+    auto *apply = window.findChild<QPushButton *>(QStringLiteral("applyHistoryButton"));
+    auto *favorite = window.findChild<QPushButton *>(QStringLiteral("favoriteHistoryButton"));
+    auto *exclude = window.findChild<QPushButton *>(QStringLiteral("excludeHistoryImageButton"));
+    auto *exportButton = window.findChild<QToolButton *>(QStringLiteral("exportMenuButton"));
+    auto *excludeImage = window.findChild<QPushButton *>(QStringLiteral("excludeImageButton"));
+    QVERIFY(historyTable);
+    QVERIFY(filter);
+    QVERIFY(apply);
+    QVERIFY(favorite);
+    QVERIFY(exclude);
+    QVERIFY(exportButton);
+    QVERIFY(excludeImage);
+    QCOMPARE(historyTable->columnCount(), 4);
+    QCOMPARE(filter->count(), 2);
+    QVERIFY(filter->findData(QStringLiteral("favorites")) >= 0);
+    QVERIFY(exportButton->menu());
+    QCOMPARE(exportButton->menu()->actions().size(), 2);
+    QVERIFY(!apply->isEnabled());
+    QVERIFY(!favorite->isEnabled());
 }
 
 void UiTests::poemManagementActionsArePresent() {
-    MainWindow window;
+    MainWindow window(nullptr, false);
     auto *addButton = window.findChild<QPushButton *>(QStringLiteral("addPoemButton"));
     auto *editButton = window.findChild<QPushButton *>(QStringLiteral("editPoemButton"));
     auto *importButton = window.findChild<QPushButton *>(QStringLiteral("importPoetryButton"));
@@ -195,7 +246,7 @@ void UiTests::poemManagementActionsArePresent() {
 }
 
 void UiTests::scheduleControlsExposeSafeBounds() {
-    MainWindow window;
+    MainWindow window(nullptr, false);
     auto *enabled = window.findChild<QCheckBox *>(QStringLiteral("scheduleCheckBox"));
     auto *interval = window.findChild<QSpinBox *>(QStringLiteral("intervalSpinBox"));
     auto *next = window.findChild<QLabel *>(QStringLiteral("scheduleNextLabel"));
@@ -208,6 +259,58 @@ void UiTests::scheduleControlsExposeSafeBounds() {
     QCOMPARE(interval->value(), 1);
     interval->setValue(1440);
     QCOMPARE(interval->value(), 1440);
+}
+
+// Drives the real wizard: accept the defaults (built-in samples) and confirm the
+// three JPEGs are copied out of qrc and registered as an image source. The config
+// already exists here, so this is not a first run and no wallpaper is applied.
+void UiTests::onboardingAddsSampleImagesWithoutApplying() {
+    ConfigStore store;
+    AppConfig seed = ConfigStore::defaultConfig();
+    seed.poems = PoetryLibrary::defaultPoems();
+    QVERIFY(store.save(seed));
+
+    MainWindow window(nullptr, false);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    bool sawWizard = false;
+    int pageCount = 0;
+    bool advanced = false;
+    QTimer poll;
+    QObject::connect(&poll, &QTimer::timeout, [&] {
+        auto *wizard = qobject_cast<QWizard *>(QApplication::activeModalWidget());
+        if (!wizard) return;
+        poll.stop();
+        sawWizard = true;
+        pageCount = wizard->pageIds().size();
+        wizard->next();
+        advanced = wizard->currentId() == 1;
+        wizard->accept();
+    });
+    poll.start(10);
+    QTimer watchdog;
+    watchdog.setSingleShot(true);
+    QObject::connect(&watchdog, &QTimer::timeout, [] {
+        if (QWidget *modal = QApplication::activeModalWidget()) modal->close();
+    });
+    watchdog.start(5000);
+
+    QVERIFY(QMetaObject::invokeMethod(&window, "showOnboarding", Qt::DirectConnection));
+    QVERIFY2(sawWizard, "onboarding wizard never appeared");
+    QCOMPARE(pageCount, 2);
+    QVERIFY2(advanced, "the wizard did not advance to the image page");
+
+    AppConfig loaded;
+    QVERIFY(store.load(loaded));
+    bool hasSampleSource = false;
+    for (const ImageSource &source : loaded.imageSources) {
+        if (QDir::cleanPath(source.path).endsWith(QStringLiteral("/samples"))) hasSampleSource = true;
+    }
+    QVERIFY2(hasSampleSource, "the sample folder was not added to the image sources");
+    QVERIFY2(loaded.history.isEmpty(), "onboarding applied a wallpaper instead of only adding images");
+    const QString sampleDir = QDir(store.rootPath()).filePath(QStringLiteral("samples"));
+    QCOMPARE(QDir(sampleDir).entryList({QStringLiteral("*.jpg")}, QDir::Files).size(), 3);
 }
 
 int main(int argc, char **argv) {

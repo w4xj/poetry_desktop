@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QSet>
 #include <QStandardPaths>
 #include <QUuid>
 
@@ -109,6 +110,50 @@ void renderFromJson(const QJsonObject &object, RenderSettings &render) {
     render.canvasBackgroundColor = colorObjectToColor(object.value(QStringLiteral("canvasBackgroundColor")), render.canvasBackgroundColor);
 }
 
+QJsonObject recordToJson(const WallpaperRecord &record) {
+    return QJsonObject{
+        {QStringLiteral("poemId"), record.poemId},
+        {QStringLiteral("poemTitle"), record.poemTitle},
+        {QStringLiteral("imagePath"), record.imagePath},
+        {QStringLiteral("wallpaperPath"), record.wallpaperPath},
+        {QStringLiteral("appliedAt"), record.appliedAt.toString(Qt::ISODate)}
+    };
+}
+
+WallpaperRecord recordFromJson(const QJsonObject &object) {
+    WallpaperRecord record;
+    if (object.value(QStringLiteral("poemId")).isString())
+        record.poemId = object.value(QStringLiteral("poemId")).toString();
+    if (object.value(QStringLiteral("poemTitle")).isString())
+        record.poemTitle = object.value(QStringLiteral("poemTitle")).toString();
+    if (object.value(QStringLiteral("imagePath")).isString())
+        record.imagePath = object.value(QStringLiteral("imagePath")).toString();
+    if (object.value(QStringLiteral("wallpaperPath")).isString())
+        record.wallpaperPath = object.value(QStringLiteral("wallpaperPath")).toString();
+    if (object.value(QStringLiteral("appliedAt")).isString())
+        record.appliedAt = QDateTime::fromString(object.value(QStringLiteral("appliedAt")).toString(), Qt::ISODate);
+    return record;
+}
+
+QJsonArray recordsToJson(const QVector<WallpaperRecord> &records) {
+    QJsonArray array;
+    for (const WallpaperRecord &record : records) array.append(recordToJson(record));
+    return array;
+}
+
+QVector<WallpaperRecord> recordsFromJson(const QJsonValue &value, int limit) {
+    QVector<WallpaperRecord> records;
+    if (!value.isArray()) return records;
+    for (const QJsonValue &entry : value.toArray()) {
+        if (!entry.isObject()) continue;
+        WallpaperRecord record = recordFromJson(entry.toObject());
+        if (record.imagePath.trimmed().isEmpty()) continue;
+        records.append(record);
+        if (records.size() >= limit) break;
+    }
+    return records;
+}
+
 QJsonObject runtimeToJson(const RuntimeState &runtime) {
     return QJsonObject{
         {QStringLiteral("lastSuccessfulWallpaper"), runtime.lastSuccessfulWallpaper},
@@ -165,6 +210,10 @@ QJsonObject configToJson(const AppConfig &config) {
             {QStringLiteral("enabled"), config.scheduleEnabled},
             {QStringLiteral("intervalMinutes"), config.intervalMinutes}
         }},
+        {QStringLiteral("autostart"), config.autostartEnabled},
+        {QStringLiteral("excludedImages"), QJsonArray::fromStringList(config.excludedImages)},
+        {QStringLiteral("history"), recordsToJson(config.history)},
+        {QStringLiteral("favorites"), recordsToJson(config.favorites)},
         {QStringLiteral("render"), renderToJson(config.render)},
         {QStringLiteral("runtime"), runtimeToJson(config.runtime)}
     };
@@ -217,8 +266,26 @@ bool configFromJson(const QJsonObject &object, AppConfig &config, QStringList *w
     if (schedule.value(QStringLiteral("intervalMinutes")).isDouble())
         config.intervalMinutes = qBound(1, schedule.value(QStringLiteral("intervalMinutes")).toInt(), 1440);
 
+    if (object.value(QStringLiteral("autostart")).isBool())
+        config.autostartEnabled = object.value(QStringLiteral("autostart")).toBool();
+    if (object.value(QStringLiteral("excludedImages")).isArray()) {
+        QSet<QString> seen;
+        for (const QJsonValue &value : object.value(QStringLiteral("excludedImages")).toArray()) {
+            if (!value.isString()) continue;
+            const QString path = QDir::cleanPath(value.toString());
+            if (path.isEmpty() || seen.contains(path)) continue;
+            seen.insert(path);
+            config.excludedImages.append(path);
+        }
+    }
+    config.history = recordsFromJson(object.value(QStringLiteral("history")), 20);
+    config.favorites = recordsFromJson(object.value(QStringLiteral("favorites")), 50);
+
     renderFromJson(object.value(QStringLiteral("render")).toObject(), config.render);
     runtimeFromJson(object.value(QStringLiteral("runtime")).toObject(), config.runtime);
+    // These fields are additive, so an older file needs no rewrite beyond the
+    // version stamp; the next save persists it in the current shape.
+    config.schemaVersion = AppConfig::currentSchemaVersion;
     return true;
 }
 

@@ -59,6 +59,12 @@ public:
     static void cleanupCache(const QString &cacheDirectory,
                              const QString &currentPath,
                              int keepCount = 10);
+
+    // Saves the rendered wallpaper to a user-chosen path. The suffix decides the
+    // format (PNG or JPG), so an exported file is always what its name says.
+    static bool exportImage(const QString &sourcePath,
+                            const QString &targetPath,
+                            QString *error = nullptr);
 };
 
 } // namespace poetry

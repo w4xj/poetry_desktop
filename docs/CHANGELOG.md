@@ -1,5 +1,70 @@
 # 变更说明
 
+## 2026-10-20 — v0.2：首启向导、开机自启、历史/收藏/排除、导出
+
+按产品评审确定的 v0.2 范围，只做三组能力，不改渲染算法与既有数据格式。
+
+### 首次使用向导（含示例图/诗）
+
+首次启动（`config.json` 不存在时）弹出两页向导：介绍 → 选择底图。底图四选一：
+内置 3 张示例图（`resources/samples/*.jpg`，编进 qrc，选中时复制到
+`%LOCALAPPDATA%\PoetryDesktop\PoetryDesktop\samples\`，不改动原图）、当前桌面壁纸
+（经 `SPI_GETDESKWALLPAPER` 读取后转存为 JPG）、自己的图片文件夹、或跳过。
+向导里可顺手勾选开机自启。首启完成且加到了图片时，扫描结束会自动生成并应用第一张壁纸；
+之后可从「更多 → 首次使用引导」重开，但重开不会再自动套用壁纸。
+
+扫描存在竞态：启动扫描还没结束就点完成，`startImageScan()` 只置 `m_scanPending`，
+当前扫描结束后自动再扫一轮，首张壁纸也等到第二轮结束才生成，避免拿旧图库空跑。
+
+### 开机自启
+
+写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `PoetryDesktop` 值，
+命令行是 `"<exe 绝对路径>" --autostart`，不需要管理员权限。`--autostart` 启动时不显示主窗口、
+静默驻留托盘；若已有实例在运行则直接退出，不弹「已经在运行」的模态框。
+每次正常启动都会重写这条启动项，迁目录后不会留下失效路径。
+
+### 切换历史、收藏与「不再出现」
+
+配置新增 `history`（最近 20 条）、`favorites`（最多 50 条）、`excludedImages`、
+`autostart`，`schemaVersion` 升到 2。全部是**增量键**，旧配置读入即空列表，无需迁移。
+
+- 历史按「诗词 ID + 底图路径」去重，成功应用后才记录；重新应用不信任可能已被清理的缓存，
+  而是用**当前排版**重新渲染。
+- 收藏与 20 条历史分离，不会被历史裁剪挤掉；随机切换有 1/4 概率回放一组收藏搭配。
+- 排除只影响随机选择，手动预览/应用仍可用；图片库与历史页都能排除和恢复。
+
+### 导出与剪贴板
+
+预览操作栏新增「导出」菜单：导出图片（PNG/JPG，按扩展名选格式，`QSaveFile` 原子写入）
+或复制当前成品到剪贴板。默认文件名 `诗词壁纸-yyyyMMdd-HHmmss.png`，目录为系统图片库。
+
+### 界面
+
+右侧标签页变为 5 个：图片库 / 诗词库 / **历史** / 显示设置 / 定时与高级；
+图片库新增「排除选中图片」；定时页新增开机自启勾选框。
+
+### 安装版与绿色版
+
+版本号升到 0.2.0。绿色版仍由 CPack 出 ZIP；安装版新增 `installer` 目标：
+先把同一套 `install()` 规则和 `windeployqt` 暂存到 `build/release/installer-stage`，
+再调用 `packaging/installer.nsi` 生成 `poetry_desktop-0.2.0-windows-x64-setup.exe`。
+
+**不用 CPack 自带 NSIS 的原因**：其模板会把非管理员的默认安装目录改到「文档」下，
+实测确实装进了 `Documents\PoetryDesktop`。本项目按用户、免提权，脚本显式装到
+`%LOCALAPPDATA%\Programs\PoetryDesktop`（`RequestExecutionLevel user`），
+开始菜单/桌面快捷方式与 HKCU 卸载项齐全；卸载保留 `%LOCALAPPDATA%\PoetryDesktop\PoetryDesktop`
+中的配置与缓存。
+
+**验证**：`poetry_tests` 32 项、`poetry_ui_tests` 9 项全过。新增用例覆盖配置增量往返、
+排除路径（大小写不敏感）、PNG/JPG 导出、自启命令行引号、内置赠答双诗在 1080p 下可渲染，
+以及一个真正驱动向导的 UI 用例
+（点击下一步、接受默认示例图，断言 3 张 JPG 从 qrc 复制成功且没有误改桌面）。
+UI 用例在 900×640 下额外断言新增的导出按钮未被裁掉。
+安装包用 `/S /D=` 静默装到临时目录，确认快捷方式、卸载注册项与净化 PATH 启动均正常，
+`Uninstall.exe /S` 后目录与注册项被清除。
+
+---
+
 ## 2026-09-27 — 双诗面板可选「合并为一块」或「各自独立成两块」
 
 新增 `RenderSettings::pairLayoutPanel`（`merged` / `separate`），在「显示设置 → 版面 → 双诗面板」切换，

@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QImageReader>
 #include <QSaveFile>
 #include <QSet>
@@ -214,6 +215,37 @@ void WallpaperService::cleanupCache(const QString &cacheDirectory,
                                      const QString &currentPath,
                                      int keepCount) {
     cleanupCache(cacheDirectory, QStringList{currentPath}, keepCount);
+}
+
+bool WallpaperService::exportImage(const QString &sourcePath,
+                                   const QString &targetPath,
+                                   QString *error) {
+    if (error) error->clear();
+    if (sourcePath.isEmpty() || !QFileInfo::exists(sourcePath)) {
+        if (error) *error = QStringLiteral("壁纸文件不存在");
+        return false;
+    }
+    if (targetPath.trimmed().isEmpty()) {
+        if (error) *error = QStringLiteral("导出路径为空");
+        return false;
+    }
+    const QImage image(sourcePath);
+    if (image.isNull()) {
+        if (error) *error = QStringLiteral("壁纸图片无法读取");
+        return false;
+    }
+    const QString suffix = QFileInfo(targetPath).suffix().toLower();
+    const bool jpeg = suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg");
+    QSaveFile output(targetPath);
+    if (!output.open(QIODevice::WriteOnly)) {
+        if (error) *error = output.errorString();
+        return false;
+    }
+    if (!image.save(&output, jpeg ? "JPG" : "PNG", jpeg ? 92 : -1) || !output.commit()) {
+        if (error) *error = output.errorString();
+        return false;
+    }
+    return true;
 }
 
 } // namespace poetry

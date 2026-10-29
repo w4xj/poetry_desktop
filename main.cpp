@@ -18,19 +18,24 @@ int main(int argc, char *argv[]) {
     app.setOrganizationDomain(QStringLiteral("local.poetry.desktop"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/app_icon.ico")));
 
+    // The Run entry launches into the tray. A second launch from the Run key must
+    // not surface a modal "already running" box on top of whatever the user is
+    // doing, so that case exits silently.
+    const bool startHidden = app.arguments().contains(QStringLiteral("--autostart"));
+
     QString appData = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (appData.isEmpty()) appData = QDir::homePath() + QStringLiteral("/.poetry_desktop");
     QDir().mkpath(appData);
     QLockFile instanceLock(QDir(appData).filePath(QStringLiteral("poetry_desktop.lock")));
     instanceLock.setStaleLockTime(30000);
     if (!instanceLock.tryLock(100)) {
-        QMessageBox::information(nullptr, QStringLiteral("诗词壁纸"), QStringLiteral("诗词壁纸已经在运行中。"));
+        if (!startHidden) QMessageBox::information(nullptr, QStringLiteral("诗词壁纸"), QStringLiteral("诗词壁纸已经在运行中。"));
         return 0;
     }
 
     MainWindow window;
     QObject::connect(&app, &QApplication::aboutToQuit, &window, &MainWindow::allowQuit);
-    window.show();
+    if (!startHidden) window.show();
     return app.exec();
 }
 

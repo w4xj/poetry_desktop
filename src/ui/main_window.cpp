@@ -1,12 +1,15 @@
 ﻿
 #include "main_window.h"
 
+#include "../platform/windows_autostart.h"
 #include "../platform/windows_wallpaper_setter.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QAbstractItemView>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QColorDialog>
 #include <QComboBox>
@@ -14,6 +17,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QEvent>
 #include <QFile>
 #include <QFileDialog>
@@ -23,6 +27,7 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHeaderView>
+#include <QImage>
 #include <QImageReader>
 #include <QInputDialog>
 #include <QLabel>
@@ -32,12 +37,14 @@
 #include <QMessageBox>
 #include <QPalette>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QScreen>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -49,6 +56,8 @@
 #include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
+#include <QWizard>
+#include <QWizardPage>
 
 namespace poetry {
 
@@ -75,6 +84,31 @@ QWidget *makeTabPage(QTabWidget *tabs, const QString &title) {
 }
 QString imageFilter() { return QStringLiteral("图片 (*.png *.jpg *.jpeg *.bmp *.webp)"); }
 
+QString normalizedPath(const QString &path) {
+    return QDir::cleanPath(QFileInfo(path).absoluteFilePath()).toCaseFolded();
+}
+
+bool isExcludedImage(const QStringList &excluded, const QString &path) {
+    if (path.isEmpty()) return false;
+    const QString normalized = normalizedPath(path);
+    for (const QString &candidate : excluded) {
+        if (normalizedPath(candidate) == normalized) return true;
+    }
+    return false;
+}
+
+bool sameWallpaperPair(const WallpaperRecord &a, const WallpaperRecord &b) {
+    if (a.poemId != b.poemId || a.imagePath.isEmpty() || b.imagePath.isEmpty()) return false;
+    return normalizedPath(a.imagePath) == normalizedPath(b.imagePath);
+}
+
+bool isFavoriteRecord(const QVector<WallpaperRecord> &favorites, const WallpaperRecord &record) {
+    for (const WallpaperRecord &favorite : favorites) {
+        if (sameWallpaperPair(favorite, record)) return true;
+    }
+    return false;
+}
+
 QString poemFormLabel(const Poem &poem) {
     if (!poem.isPaired()) return QStringLiteral("单首");
     const QString key = poem.relation.toLower();
@@ -92,10 +126,108 @@ const RelationChoice kRelationChoices[] = {
     {"harmony", "唱和（原唱·奉和）"},
     {"qa", "问答（一问一答）"},
 };
+
+class OnboardingIntroPage final : public QWizardPage {
+public:
+    explicit OnboardingIntroPage(QWidget *parent = nullptr) : QWizardPage(parent) {
+        setTitle(QStringLiteral("欢迎使用诗词壁纸"));
+        setSubTitle(QStringLiteral("用你的图片做底，让诗词落在桌面上。"));
+        auto *layout = new QVBoxLayout(this);
+        layout->setSpacing(10);
+        auto *body = new QLabel(QStringLiteral(
+            "三步就能开始：\n\n"
+            "1. 选择底图：内置 3 张示例图，也可以指向你自己的图片文件夹。\n"
+            "2. 选择诗词：已内置示例诗词，其中一首是赠答双诗，可在「诗词库」里增删改。\n"
+            "3. 点击「随机换一张壁纸」生成并应用；左侧预览的改动不会自动修改桌面。\n\n"
+            "所有图片和配置都保存在本机，不会上传网络。"), this);
+        body->setWordWrap(true);
+        body->setTextFormat(Qt::PlainText);
+        layout->addWidget(body);
+        auto *hint = new QLabel(QStringLiteral("下一步先准备底图。"), this);
+        hint->setObjectName(QStringLiteral("fieldHintLabel"));
+        layout->addWidget(hint);
+        layout->addStretch();
+    }
+};
+
+class OnboardingImagePage final : public QWizardPage {
+public:
+    explicit OnboardingImagePage(QWidget *parent = nullptr) : QWizardPage(parent) {
+        setTitle(QStringLiteral("选择底图"));
+        setSubTitle(QStringLiteral("先准备几张图片，之后可以随时在「图片库」里增删。"));
+
+        auto *layout = new QVBoxLayout(this);
+        layout->setSpacing(8);
+        auto *group = new QButtonGroup(this);
+        m_samples = new QRadioButton(QStringLiteral("使用内置示例图片（3 张，推荐）"), this);
+        m_current = new QRadioButton(QStringLiteral("使用我当前的桌面壁纸"), this);
+        m_folder = new QRadioButton(QStringLiteral("使用我的图片文件夹"), this);
+        m_skip = new QRadioButton(QStringLiteral("暂不添加，稍后在「图片库」中设置"), this);
+        m_samples->setChecked(true);
+        for (QRadioButton *button : {m_samples, m_current, m_folder, m_skip}) group->addButton(button);
+        layout->addWidget(m_samples);
+        layout->addWidget(m_current);
+
+        auto *folderRow = new QHBoxLayout();
+        folderRow->setSpacing(8);
+        folderRow->addWidget(m_folder);
+        m_folderEdit = new QLineEdit(this);
+        m_folderEdit->setPlaceholderText(QStringLiteral("选择包含图片的文件夹"));
+        m_folderEdit->setEnabled(false);
+        auto *browseButton = new QPushButton(QStringLiteral("浏览…"), this);
+        browseButton->setEnabled(false);
+        folderRow->addWidget(m_folderEdit, 1);
+        folderRow->addWidget(browseButton);
+        layout->addLayout(folderRow);
+        layout->addWidget(m_skip);
+
+        auto *hint = new QLabel(QStringLiteral("示例图片和当前桌面壁纸会复制一份到应用数据目录，不会改动原图。"), this);
+        hint->setObjectName(QStringLiteral("fieldHintLabel"));
+        hint->setWordWrap(true);
+        layout->addWidget(hint);
+
+        layout->addSpacing(6);
+        m_autostart = new QCheckBox(QStringLiteral("登录 Windows 后自动启动（静默驻留托盘，可随时关闭）"), this);
+        layout->addWidget(m_autostart);
+        layout->addStretch();
+
+        connect(m_folder, &QRadioButton::toggled, this, [this, browseButton](bool checked) {
+            m_folderEdit->setEnabled(checked);
+            browseButton->setEnabled(checked);
+            emit completeChanged();
+        });
+        connect(m_folderEdit, &QLineEdit::textChanged, this, [this] { emit completeChanged(); });
+        connect(browseButton, &QPushButton::clicked, this, [this] {
+            const QString start = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+            const QString path = QFileDialog::getExistingDirectory(this, QStringLiteral("选择图片文件夹"), start);
+            if (path.isEmpty()) return;
+            m_folderEdit->setText(QDir::cleanPath(QFileInfo(path).absoluteFilePath()));
+            m_folder->setChecked(true);
+        });
+    }
+
+    bool isComplete() const override {
+        return !m_folder->isChecked() || !m_folderEdit->text().trimmed().isEmpty();
+    }
+
+    bool wantsSamples() const { return m_samples->isChecked(); }
+    bool wantsCurrentWallpaper() const { return m_current->isChecked(); }
+    QString folderPath() const { return m_folder->isChecked() ? m_folderEdit->text().trimmed() : QString(); }
+    bool wantsAutostart() const { return m_autostart->isChecked(); }
+
+private:
+    QRadioButton *m_samples = nullptr;
+    QRadioButton *m_current = nullptr;
+    QRadioButton *m_folder = nullptr;
+    QRadioButton *m_skip = nullptr;
+    QLineEdit *m_folderEdit = nullptr;
+    QCheckBox *m_autostart = nullptr;
+};
 }
 
-MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), m_picker(static_cast<quint32>(QDateTime::currentMSecsSinceEpoch() & 0xffffffffu)) {
+MainWindow::MainWindow(QWidget *parent, bool enableOnboarding)
+    : QMainWindow(parent), m_enableOnboarding(enableOnboarding),
+      m_picker(static_cast<quint32>(QDateTime::currentMSecsSinceEpoch() & 0xffffffffu)) {
     setWindowTitle(QStringLiteral("诗词壁纸"));
     setMinimumSize(900, 640);
     resize(1440, 900);
@@ -105,6 +237,7 @@ MainWindow::MainWindow(QWidget *parent)
     startImageScan();
     updateScheduleTimer();
     updateAllUi();
+    if (m_firstRun && m_enableOnboarding) QTimer::singleShot(0, this, &MainWindow::showOnboarding);
 }
 
 MainWindow::~MainWindow() {
@@ -164,9 +297,11 @@ void MainWindow::setupUi() {
         QPushButton#resetDisplaySettingsButton { border-color: transparent; background: transparent; color: #475569; }
         QPushButton#resetDisplaySettingsButton:hover { background: #f1f5f9; border-color: #cbd5e1; }
 
-        QToolButton#moreMenuButton { min-height: 28px; padding: 2px 11px; border: 1px solid #cbd5e1;
-                                     border-radius: 7px; background: #ffffff; color: #1f2937; font-size: 11pt; }
-        QToolButton#moreMenuButton:hover { background: #f1f5f9; border-color: #94a3b8; }
+        QToolButton#moreMenuButton, QToolButton#exportMenuButton { min-height: 28px; padding: 2px 11px;
+                                     border: 1px solid #cbd5e1; border-radius: 7px; background: #ffffff;
+                                     color: #1f2937; font-size: 11pt; }
+        QToolButton#moreMenuButton:hover, QToolButton#exportMenuButton:hover { background: #f1f5f9; border-color: #94a3b8; }
+        QToolButton#exportMenuButton:disabled { color: #a3afbd; background: #f4f6f9; border-color: #e4e9ef; }
 
         QComboBox, QFontComboBox, QSpinBox, QLineEdit { min-height: 28px; padding: 1px 8px;
                                                         border: 1px solid #cbd5e1; border-radius: 7px;
@@ -225,12 +360,14 @@ void MainWindow::setupUi() {
     auto *openCacheAction = moreMenu->addAction(QStringLiteral("打开缓存目录"));
     auto *openLogAction = moreMenu->addAction(QStringLiteral("打开日志目录"));
     auto *clearCacheAction = moreMenu->addAction(QStringLiteral("清理缓存"));
+    auto *onboardingAction = moreMenu->addAction(QStringLiteral("首次使用引导"));
     moreMenu->addSeparator();
     auto *quitAction = moreMenu->addAction(QStringLiteral("退出"));
     moreButton->setMenu(moreMenu);
     connect(openCacheAction, &QAction::triggered, this, &MainWindow::openCacheDirectory);
     connect(openLogAction, &QAction::triggered, this, &MainWindow::openLogDirectory);
     connect(clearCacheAction, &QAction::triggered, this, &MainWindow::clearCache);
+    connect(onboardingAction, &QAction::triggered, this, &MainWindow::showOnboarding);
     connect(quitAction, &QAction::triggered, this, &MainWindow::quitFromTray);
     topBar->addLayout(brandCol);
     topBar->addSpacing(6);
@@ -273,10 +410,22 @@ void MainWindow::setupUi() {
     m_pauseButton = new QPushButton(QStringLiteral("开启定时"), previewGroup);
     m_pauseButton->setObjectName(QStringLiteral("pauseScheduleButton"));
     m_pauseButton->setToolTip(QStringLiteral("\u5feb\u901f\u5f00\u542f\u6216\u505c\u6b62\u5b9a\u65f6\u5207\u6362"));
+    m_exportMenuButton = new QToolButton(previewGroup);
+    m_exportMenuButton->setObjectName(QStringLiteral("exportMenuButton"));
+    m_exportMenuButton->setText(QStringLiteral("导出"));
+    m_exportMenuButton->setToolTip(QStringLiteral("把当前成品保存为图片，或复制到剪贴板"));
+    m_exportMenuButton->setPopupMode(QToolButton::InstantPopup);
+    auto *exportMenu = new QMenu(m_exportMenuButton);
+    auto *saveImageAction = exportMenu->addAction(QStringLiteral("导出图片…"));
+    auto *copyImageAction = exportMenu->addAction(QStringLiteral("复制图片到剪贴板"));
+    m_exportMenuButton->setMenu(exportMenu);
+    connect(saveImageAction, &QAction::triggered, this, &MainWindow::exportPreviewImage);
+    connect(copyImageAction, &QAction::triggered, this, &MainWindow::copyPreviewImage);
     actionBar->addWidget(m_switchButton);
     actionBar->addWidget(m_applyPreviewButton);
     actionBar->addWidget(m_refreshPreviewButton);
     actionBar->addWidget(m_pauseButton);
+    actionBar->addWidget(m_exportMenuButton);
     actionBar->addStretch();
     previewLayout->addLayout(actionBar);
 
@@ -367,8 +516,12 @@ void MainWindow::setupUi() {
     m_setSelectedImageButton = new QPushButton(QStringLiteral("将选中图片设为壁纸"), imagePage);
     m_setSelectedImageButton->setObjectName(QStringLiteral("setSelectedImageButton"));
     m_setSelectedImageButton->setToolTip(QStringLiteral("直接把这张原图设为桌面壁纸，不叠加诗词。"));
+    m_excludeImageButton = new QPushButton(QStringLiteral("排除选中图片"), imagePage);
+    m_excludeImageButton->setObjectName(QStringLiteral("excludeImageButton"));
+    m_excludeImageButton->setToolTip(QStringLiteral("从随机换壁纸中排除这张图片，不会删除原文件。"));
     imageActionRow->addWidget(m_useSelectedImagePreviewButton);
     imageActionRow->addWidget(m_setSelectedImageButton);
+    imageActionRow->addWidget(m_excludeImageButton);
     imageActionRow->addStretch();
     imageRoot->addLayout(imageActionRow);
     m_imageScanLabel = new QLabel(imagePage);
@@ -412,6 +565,51 @@ void MainWindow::setupUi() {
     m_poemCountLabel = new QLabel(poemPage);
     m_poemCountLabel->setObjectName(QStringLiteral("poemCountLabel"));
     poemRoot->addWidget(m_poemCountLabel);
+
+    auto *historyPage = makeTabPage(m_tabs, QStringLiteral("历史"));
+    auto *historyRoot = new QVBoxLayout(historyPage);
+    auto *historyToolbar = new QHBoxLayout();
+    historyToolbar->setSpacing(8);
+    m_historyFilter = new QComboBox(historyPage);
+    m_historyFilter->setObjectName(QStringLiteral("historyFilterComboBox"));
+    m_historyFilter->addItem(QStringLiteral("全部记录"), QStringLiteral("all"));
+    m_historyFilter->addItem(QStringLiteral("仅收藏"), QStringLiteral("favorites"));
+    m_applyHistoryButton = new QPushButton(QStringLiteral("重新应用"), historyPage);
+    m_applyHistoryButton->setObjectName(QStringLiteral("applyHistoryButton"));
+    m_applyHistoryButton->setToolTip(QStringLiteral("用当前排版重新生成这张壁纸并应用到桌面。"));
+    m_favoriteHistoryButton = new QPushButton(QStringLiteral("收藏"), historyPage);
+    m_favoriteHistoryButton->setObjectName(QStringLiteral("favoriteHistoryButton"));
+    m_favoriteHistoryButton->setToolTip(QStringLiteral("收藏的搭配会偶尔出现在随机结果中。"));
+    m_excludeHistoryImageButton = new QPushButton(QStringLiteral("排除底图"), historyPage);
+    m_excludeHistoryImageButton->setObjectName(QStringLiteral("excludeHistoryImageButton"));
+    m_excludeHistoryImageButton->setToolTip(QStringLiteral("不再随机使用这张底图，原文件不会被删除。"));
+    historyToolbar->addWidget(m_historyFilter);
+    historyToolbar->addWidget(m_applyHistoryButton);
+    historyToolbar->addWidget(m_favoriteHistoryButton);
+    historyToolbar->addWidget(m_excludeHistoryImageButton);
+    historyToolbar->addStretch();
+    historyRoot->addLayout(historyToolbar);
+    m_historyTable = new QTableWidget(historyPage);
+    m_historyTable->setObjectName(QStringLiteral("historyTable"));
+    m_historyTable->setColumnCount(4);
+    m_historyTable->setHorizontalHeaderLabels({QStringLiteral("收藏"), QStringLiteral("诗词"),
+                                               QStringLiteral("底图"), QStringLiteral("时间")});
+    m_historyTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_historyTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_historyTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_historyTable->verticalHeader()->setDefaultSectionSize(32);
+    m_historyTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_historyTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_historyTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_historyTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    historyRoot->addWidget(m_historyTable, 1);
+    m_historySummaryLabel = new QLabel(historyPage);
+    m_historySummaryLabel->setObjectName(QStringLiteral("historySummaryLabel"));
+    historyRoot->addWidget(m_historySummaryLabel);
+    auto *historyHint = new QLabel(QStringLiteral("保留最近 20 次；收藏会长期保留。重新应用会按当前排版重新生成。"), historyPage);
+    historyHint->setObjectName(QStringLiteral("fieldHintLabel"));
+    historyHint->setWordWrap(true);
+    historyRoot->addWidget(historyHint);
 
     auto *displayPage = makeTabPage(m_tabs, QStringLiteral("显示设置"));
     auto *displayRoot = new QVBoxLayout(displayPage);
@@ -531,8 +729,12 @@ void MainWindow::setupUi() {
     m_scheduleNextLabel = new QLabel(schedulePage);
     m_scheduleNextLabel->setObjectName(QStringLiteral("scheduleNextLabel"));
     scheduleForm->addRow(QStringLiteral("下次切换"), m_scheduleNextLabel);
+    m_autostartCheck = new QCheckBox(QStringLiteral("登录 Windows 后自动启动（静默驻留托盘）"), schedulePage);
+    m_autostartCheck->setObjectName(QStringLiteral("autostartCheckBox"));
+    m_autostartCheck->setToolTip(QStringLiteral("写入当前用户的启动项；不需要管理员权限，可随时关闭。"));
+    scheduleForm->addRow(QString(), m_autostartCheck);
     scheduleRoot->addWidget(scheduleCard);
-    auto *scheduleHint = new QLabel(QStringLiteral("程序重启后按启动时间重新计时，不补偿错过的切换。"), schedulePage);
+    auto *scheduleHint = new QLabel(QStringLiteral("程序重启后按启动时间重新计时，不补偿错过的切换；开启上面的开机自启才能在重启后继续。"), schedulePage);
     scheduleHint->setObjectName(QStringLiteral("fieldHintLabel"));
     scheduleHint->setWordWrap(true);
     scheduleRoot->addWidget(scheduleHint);
@@ -561,6 +763,7 @@ void MainWindow::setupUi() {
     connect(m_imageFiles, &QListWidget::currentRowChanged, this, &MainWindow::imageFileSelectionChanged);
     connect(m_useSelectedImagePreviewButton, &QPushButton::clicked, this, &MainWindow::useSelectedImagePreview);
     connect(m_setSelectedImageButton, &QPushButton::clicked, this, &MainWindow::setSelectedImageWallpaper);
+    connect(m_excludeImageButton, &QPushButton::clicked, this, &MainWindow::toggleSelectedImageExclusion);
     connect(addPoemButton, &QPushButton::clicked, this, &MainWindow::addPoem);
     connect(editPoemButton, &QPushButton::clicked, this, &MainWindow::editSelectedPoem);
     connect(importButton, &QPushButton::clicked, this, &MainWindow::importPoetry);
@@ -574,6 +777,11 @@ void MainWindow::setupUi() {
     connect(deletePoemButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedPoem);
     connect(usePoemButton, &QPushButton::clicked, this, &MainWindow::useSelectedPoemPreview);
     connect(m_poemTable, &QTableWidget::itemChanged, this, &MainWindow::poemItemChanged);
+    connect(m_historyFilter, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::historyFilterChanged);
+    connect(m_historyTable, &QTableWidget::itemSelectionChanged, this, &MainWindow::historySelectionChanged);
+    connect(m_applyHistoryButton, &QPushButton::clicked, this, &MainWindow::applySelectedHistory);
+    connect(m_favoriteHistoryButton, &QPushButton::clicked, this, &MainWindow::toggleSelectedFavorite);
+    connect(m_excludeHistoryImageButton, &QPushButton::clicked, this, &MainWindow::excludeSelectedHistoryImage);
     connect(m_textColorButton, &QPushButton::clicked, this, &MainWindow::chooseTextColor);
     connect(m_titleColorButton, &QPushButton::clicked, this, &MainWindow::chooseTitleColor);
     connect(m_metadataColorButton, &QPushButton::clicked, this, &MainWindow::chooseMetadataColor);
@@ -592,6 +800,7 @@ void MainWindow::setupUi() {
     connect(resetDisplayButton, &QPushButton::clicked, this, &MainWindow::resetDisplaySettings);
     connect(m_scheduleCheck, &QCheckBox::toggled, this, &MainWindow::toggleSchedule);
     connect(m_intervalSpin, &QSpinBox::valueChanged, this, &MainWindow::saveScheduleSettings);
+    connect(m_autostartCheck, &QCheckBox::toggled, this, &MainWindow::toggleAutostart);
     connect(openCacheButton, &QPushButton::clicked, this, &MainWindow::openCacheDirectory);
     connect(openLogButton, &QPushButton::clicked, this, &MainWindow::openLogDirectory);
     connect(m_clearCacheButton, &QPushButton::clicked, this, &MainWindow::clearCache);
@@ -633,11 +842,22 @@ void MainWindow::setupTray() {
 }
 void MainWindow::loadState() {
     const bool hadConfigFile = QFile::exists(m_store.configPath());
+    m_firstRun = !hadConfigFile;
     QStringList warnings;
     m_store.load(m_config, &warnings);
     if (!hadConfigFile) {
         m_config.poems = PoetryLibrary::defaultPoems();
         persistConfig();
+    }
+    // Repair the Run entry on every start: the executable may have moved, and a
+    // stale quoted path would fail silently at login.
+    if (m_config.autostartEnabled) {
+        QString error;
+        if (!WindowsAutoStart::setEnabled(true, &error)) {
+            m_config.autostartEnabled = false;
+            warnings.append(QStringLiteral("开机自启未能生效：%1").arg(error));
+            persistConfig();
+        }
     }
     m_picker.rememberPoem(m_config.runtime.lastPoemId);
     m_picker.rememberImage(m_config.runtime.lastImagePath);
@@ -687,6 +907,7 @@ void MainWindow::updateAllUi() {
     updateImageUi();
     updateImageFilesUi();
     updatePoemUi();
+    updateHistoryUi();
     updateSettingsUi();
     updatePreviewSummary();
     updateStatusUi();
@@ -716,9 +937,12 @@ void MainWindow::updateImageFilesUi() {
     const QVector<ImageItem> items = m_imageLibrary.validItems();
     for (int i = 0; i < items.size(); ++i) {
         const ImageItem &image = items.at(i);
-        auto *item = new QListWidgetItem(QFileInfo(image.path).fileName(), m_imageFiles);
+        const bool excluded = isExcludedImage(m_config.excludedImages, image.path);
+        const QString name = QFileInfo(image.path).fileName();
+        auto *item = new QListWidgetItem(excluded ? QStringLiteral("%1（已排除）").arg(name) : name, m_imageFiles);
         item->setData(Qt::UserRole, image.path);
-        item->setToolTip(image.path);
+        item->setToolTip(excluded ? QStringLiteral("%1\n已排除，仍可通过按钮恢复参与随机。").arg(image.path) : image.path);
+        if (excluded) item->setForeground(QColor(QStringLiteral("#94a3b8")));
         if (image.path == previous) selectedRow = i;
     }
     if (selectedRow < 0 && !previous.isEmpty() && QFileInfo::exists(previous)) {
@@ -823,11 +1047,13 @@ void MainWindow::updateSettingsUi() {
     m_fitCombo->setCurrentIndex(m_fitCombo->findData(fitModeToString(m_config.render.fitMode)));
     const QSignalBlocker b12(m_scheduleCheck);
     const QSignalBlocker b13(m_intervalSpin);
+    const QSignalBlocker b18(m_autostartCheck);
     m_scheduleCheck->setChecked(m_config.scheduleEnabled);
     m_intervalSpin->setValue(m_config.intervalMinutes);
+    m_autostartCheck->setChecked(m_config.autostartEnabled);
 }
 void MainWindow::updateStatusUi() {
-    const int validImages = m_imageLibrary.validItems().size();
+    const int validImages = availableImages().size();
     const int validPoems = enabledPoems().size();
     m_countsLabel->setText(QStringLiteral("图片 %1 · 诗词 %2").arg(validImages).arg(validPoems));
     if (m_desktopBusy || m_previewBusy) {
@@ -847,6 +1073,17 @@ void MainWindow::updateStatusUi() {
     const bool hasImage = !selectedImage().path.isEmpty();
     m_useSelectedImagePreviewButton->setEnabled(!m_desktopBusy && !m_previewBusy && hasImage && validPoems > 0);
     m_setSelectedImageButton->setEnabled(!m_desktopBusy && hasImage);
+    m_excludeImageButton->setEnabled(hasImage);
+    m_excludeImageButton->setText(isExcludedImage(m_config.excludedImages, m_selectedImagePath)
+        ? QStringLiteral("恢复选中图片") : QStringLiteral("排除选中图片"));
+    m_exportMenuButton->setEnabled(m_hasPreviewContent && QFileInfo::exists(m_previewPath));
+    WallpaperRecord record;
+    bool favorite = false;
+    const bool recordSelected = selectedHistoryRecord(&record, &favorite);
+    m_applyHistoryButton->setEnabled(recordSelected && !m_desktopBusy && !m_previewBusy);
+    m_excludeHistoryImageButton->setEnabled(recordSelected && !m_desktopBusy);
+    m_favoriteHistoryButton->setEnabled(recordSelected);
+    m_favoriteHistoryButton->setText(favorite ? QStringLiteral("取消收藏") : QStringLiteral("收藏"));
     m_pauseButton->setText(m_config.scheduleEnabled ? QStringLiteral("暂停定时") : QStringLiteral("开启定时"));
     m_scheduleSummaryLabel->setText(m_config.scheduleEnabled ? QStringLiteral("定时已开启") : QStringLiteral("定时已关闭"));
 }
@@ -908,8 +1145,215 @@ void MainWindow::updateScheduleTimer() {
     m_scheduleSummaryLabel->setText(QStringLiteral("每 %1 分钟 · 下次 %2").arg(interval).arg(next.toString(QStringLiteral("HH:mm"))));
 }
 
+void MainWindow::updateHistoryUi() {
+    if (!m_historyTable || !m_historyFilter) return;
+
+    QString selectedPoemId;
+    QString selectedImagePath;
+    const int oldRow = m_historyTable->currentRow();
+    if (oldRow >= 0 && oldRow < m_visibleHistory.size()) {
+        selectedPoemId = m_visibleHistory.at(oldRow).poemId;
+        selectedImagePath = m_visibleHistory.at(oldRow).imagePath;
+    }
+
+    const bool favoritesOnly = m_historyFilter->currentData().toString() == QStringLiteral("favorites");
+    m_visibleHistory = favoritesOnly ? m_config.favorites : m_config.history;
+
+    {
+        const QSignalBlocker blocker(m_historyTable);
+        m_historyTable->setRowCount(0);
+        for (int row = 0; row < m_visibleHistory.size(); ++row) {
+            const WallpaperRecord &record = m_visibleHistory.at(row);
+            m_historyTable->insertRow(row);
+
+            const bool favorite = isFavoriteRecord(m_config.favorites, record);
+            auto *star = new QTableWidgetItem(favorite ? QStringLiteral("★") : QStringLiteral("☆"));
+            star->setTextAlignment(Qt::AlignCenter);
+            star->setForeground(QColor(favorite ? QStringLiteral("#d97706") : QStringLiteral("#94a3b8")));
+            m_historyTable->setItem(row, 0, star);
+
+            auto *poemItem = new QTableWidgetItem(record.poemTitle.isEmpty()
+                ? QStringLiteral("（未命名诗词）") : record.poemTitle);
+            poemItem->setToolTip(record.poemId);
+            m_historyTable->setItem(row, 1, poemItem);
+
+            const bool imageExists = QFileInfo::exists(record.imagePath);
+            const QString imageName = record.imagePath.isEmpty()
+                ? QStringLiteral("（底图已移除）") : QFileInfo(record.imagePath).fileName();
+            auto *imageItem = new QTableWidgetItem(imageExists ? imageName
+                : QStringLiteral("%1（缺失）").arg(imageName));
+            imageItem->setToolTip(record.imagePath);
+            if (!imageExists) imageItem->setForeground(QColor(QStringLiteral("#b42318")));
+            m_historyTable->setItem(row, 2, imageItem);
+
+            auto *timeItem = new QTableWidgetItem(record.appliedAt.isValid()
+                ? record.appliedAt.toString(QStringLiteral("MM-dd HH:mm")) : QStringLiteral("—"));
+            timeItem->setForeground(QColor(QStringLiteral("#64748b")));
+            m_historyTable->setItem(row, 3, timeItem);
+        }
+    }
+
+    if (m_visibleHistory.isEmpty()) {
+        m_historySummaryLabel->setText(favoritesOnly
+            ? QStringLiteral("还没有收藏。应用一张壁纸后可在历史里收藏。")
+            : QStringLiteral("还没有历史。成功应用一张壁纸后会出现在这里。"));
+    } else {
+        m_historySummaryLabel->setText(favoritesOnly
+            ? QStringLiteral("收藏 %1 条").arg(m_config.favorites.size())
+            : QStringLiteral("最近 %1 条 · 收藏 %2 条").arg(m_config.history.size()).arg(m_config.favorites.size()));
+    }
+
+    int selectRow = -1;
+    if (!selectedPoemId.isEmpty()) {
+        for (int row = 0; row < m_visibleHistory.size(); ++row) {
+            const WallpaperRecord &record = m_visibleHistory.at(row);
+            if (record.poemId == selectedPoemId
+                && normalizedPath(record.imagePath) == normalizedPath(selectedImagePath)) {
+                selectRow = row;
+                break;
+            }
+        }
+    }
+    if (selectRow < 0 && !m_visibleHistory.isEmpty()) selectRow = 0;
+    if (selectRow >= 0) m_historyTable->selectRow(selectRow);
+}
+
+QVector<ImageItem> MainWindow::availableImages() const {
+    return m_imageLibrary.availableItems(m_config.excludedImages);
+}
+
+void MainWindow::rememberWallpaper(const Poem &poem, const ImageItem &image, const QString &path) {
+    if (path.isEmpty() || poem.id.isEmpty() || image.path.isEmpty()) return;
+    WallpaperRecord record{poem.id, poem.title, image.path, path, QDateTime::currentDateTime()};
+    for (int i = 0; i < m_config.history.size(); ++i) {
+        if (sameWallpaperPair(m_config.history.at(i), record)) {
+            m_config.history.removeAt(i);
+            break;
+        }
+    }
+    m_config.history.prepend(record);
+    while (m_config.history.size() > 20) m_config.history.removeLast();
+    for (WallpaperRecord &favorite : m_config.favorites) {
+        if (sameWallpaperPair(favorite, record)) {
+            favorite.poemTitle = record.poemTitle;
+            favorite.wallpaperPath = record.wallpaperPath;
+            favorite.appliedAt = record.appliedAt;
+            break;
+        }
+    }
+}
+
+bool MainWindow::selectedHistoryRecord(WallpaperRecord *record, bool *favorite) const {
+    if (favorite) *favorite = false;
+    if (!m_historyTable) return false;
+    const int row = m_historyTable->currentRow();
+    if (row < 0 || row >= m_visibleHistory.size()) return false;
+    const WallpaperRecord &selected = m_visibleHistory.at(row);
+    if (record) *record = selected;
+    if (favorite) *favorite = isFavoriteRecord(m_config.favorites, selected);
+    return true;
+}
+
+void MainWindow::historyFilterChanged() {
+    if (m_historyTable) m_historyTable->clearSelection();
+    updateHistoryUi();
+    updateStatusUi();
+}
+
+void MainWindow::historySelectionChanged() {
+    updateStatusUi();
+}
+
+void MainWindow::toggleSelectedFavorite() {
+    WallpaperRecord record;
+    bool favorite = false;
+    if (!selectedHistoryRecord(&record, &favorite)) return;
+    if (favorite) {
+        for (int i = 0; i < m_config.favorites.size(); ++i) {
+            if (sameWallpaperPair(m_config.favorites.at(i), record)) {
+                m_config.favorites.removeAt(i);
+                break;
+            }
+        }
+        m_statusLabel->setText(QStringLiteral("已取消收藏"));
+    } else {
+        m_config.favorites.prepend(record);
+        while (m_config.favorites.size() > 50) m_config.favorites.removeLast();
+        m_statusLabel->setText(QStringLiteral("已收藏：%1").arg(record.poemTitle.isEmpty()
+            ? QStringLiteral("未命名诗词") : record.poemTitle));
+    }
+    persistConfig();
+    updateHistoryUi();
+    updateStatusUi();
+}
+
+void MainWindow::excludeSelectedHistoryImage() {
+    WallpaperRecord record;
+    if (!selectedHistoryRecord(&record, nullptr) || record.imagePath.isEmpty()) return;
+    if (isExcludedImage(m_config.excludedImages, record.imagePath)) {
+        m_statusLabel->setText(QStringLiteral("这张底图已经在排除列表中"));
+        return;
+    }
+    m_config.excludedImages.append(QDir::cleanPath(QFileInfo(record.imagePath).absoluteFilePath()));
+    persistConfig();
+    updateImageFilesUi();
+    updateHistoryUi();
+    updateStatusUi();
+    m_statusLabel->setText(QStringLiteral("已从随机切换中排除底图：%1").arg(QFileInfo(record.imagePath).fileName()));
+}
+
+void MainWindow::applySelectedHistory() {
+    WallpaperRecord record;
+    if (!selectedHistoryRecord(&record, nullptr)) return;
+    const Poem *poem = nullptr;
+    for (const Poem &candidate : m_config.poems) {
+        if (candidate.id == record.poemId && candidate.enabled && !candidate.content.trimmed().isEmpty()) {
+            poem = &candidate;
+            break;
+        }
+    }
+    if (!poem) {
+        m_statusLabel->setText(QStringLiteral("对应的诗词已被删除或停用，无法重新应用"));
+        return;
+    }
+    if (!QFileInfo::exists(record.imagePath)) {
+        m_statusLabel->setText(QStringLiteral("对应的底图已不存在，无法重新应用"));
+        return;
+    }
+    const ImageItem image{record.imagePath, QFileInfo(record.imagePath).size(),
+                          QFileInfo(record.imagePath).lastModified(), true, {}};
+    startRenderedApply(*poem, image);
+}
+
+void MainWindow::toggleSelectedImageExclusion() {
+    if (m_selectedImagePath.isEmpty() || !QFileInfo::exists(m_selectedImagePath)) return;
+    int existing = -1;
+    for (int i = 0; i < m_config.excludedImages.size(); ++i) {
+        if (normalizedPath(m_config.excludedImages.at(i)) == normalizedPath(m_selectedImagePath)) {
+            existing = i;
+            break;
+        }
+    }
+    if (existing >= 0) {
+        m_config.excludedImages.removeAt(existing);
+        m_statusLabel->setText(QStringLiteral("已恢复这张图片参与随机切换"));
+    } else {
+        m_config.excludedImages.append(QDir::cleanPath(QFileInfo(m_selectedImagePath).absoluteFilePath()));
+        m_statusLabel->setText(QStringLiteral("已排除这张图片，不会再随机使用"));
+    }
+    persistConfig();
+    updateImageFilesUi();
+    updateHistoryUi();
+    updateStatusUi();
+}
+
 void MainWindow::startImageScan() {
-    if (m_scanWatcher.isRunning()) return;
+    if (m_scanWatcher.isRunning()) {
+        // Onboarding or a source edit can land while the startup scan is still
+        // walking the old source list; scan again when it finishes.
+        m_scanPending = true;
+        return;
+    }
     m_imageScanLabel->setText(QStringLiteral("正在扫描，新文件将在完成后更新…"));
     const QVector<ImageSource> sources = m_config.imageSources;
     m_scanWatcher.setFuture(QtConcurrent::run([sources] { return ImageLibrary::scan(sources); }));
@@ -924,6 +1368,21 @@ void MainWindow::scanFinished() {
     hydratePreviewState();
     m_imageScanLabel->setText(QStringLiteral("扫描完成：有效图片 %1 张，跳过 %2 张").arg(result.items.size()).arg(result.skipped));
     if (!result.errors.isEmpty()) appendLog(QStringLiteral("WARN"), result.errors.mid(0, 20).join(QStringLiteral("；")));
+    if (m_scanPending) {
+        m_scanPending = false;
+        startImageScan();
+        updateStatusUi();
+        return;
+    }
+    if (m_pendingFirstWallpaper) {
+        m_pendingFirstWallpaper = false;
+        if (availableImages().isEmpty()) {
+            m_statusLabel->setText(QStringLiteral("还没有可用图片，添加图片目录后会继续生成第一张壁纸"));
+        } else {
+            randomSwitchWallpaper();
+            return;
+        }
+    }
     updateStatusUi();
 }
 void MainWindow::addImageDirectory() {
@@ -1210,31 +1669,55 @@ void MainWindow::useSelectedPoemPreview() {
 void MainWindow::randomSwitchWallpaper() {
     if (m_desktopBusy || m_previewBusy) return;
     const QVector<Poem> poems = enabledPoems();
-    const QVector<ImageItem> images = m_imageLibrary.validItems();
+    const QVector<ImageItem> images = availableImages();
     if (poems.isEmpty() || images.isEmpty()) {
         m_statusLabel->setText(QStringLiteral("缺少可用图片或诗词，无法随机换一张壁纸"));
         updateStatusUi();
         return;
     }
-    // Picking happens here, not in the worker. Drawing from a copy of m_picker
-    // left the original frozen on its seed, so every click replayed the same
-    // number and, combined with the avoid-consecutive rule, alternated between
-    // the same two images forever.
-    const int poemIndex = m_picker.pickPoem(poems);
-    const int imageIndex = m_picker.pickImage(images);
-    if (poemIndex < 0 || imageIndex < 0) {
+
+    struct FavoritePair { Poem poem; ImageItem image; };
+    QVector<FavoritePair> playableFavorites;
+    for (const WallpaperRecord &favorite : m_config.favorites) {
+        const Poem *poem = nullptr;
+        for (const Poem &candidate : poems) {
+            if (candidate.id == favorite.poemId) { poem = &candidate; break; }
+        }
+        if (!poem) continue;
+        const ImageItem *image = nullptr;
+        for (const ImageItem &candidate : images) {
+            if (normalizedPath(candidate.path) == normalizedPath(favorite.imagePath)) { image = &candidate; break; }
+        }
+        if (image) playableFavorites.append(FavoritePair{*poem, *image});
+    }
+
+    // A quarter of the draws replay a starred pairing. This keeps favourites in
+    // rotation without turning the app into a fixed playlist.
+    const bool useFavorite = !playableFavorites.isEmpty() && m_picker.pickIndex(4, -1) == 0;
+    const int poemIndex = useFavorite ? -1 : m_picker.pickPoem(poems);
+    const int imageIndex = useFavorite ? -1 : m_picker.pickImage(images);
+    if ((!useFavorite && (poemIndex < 0 || imageIndex < 0)) || (useFavorite && playableFavorites.isEmpty())) {
         m_statusLabel->setText(QStringLiteral("随机抽取失败"));
         updateStatusUi();
         return;
     }
-    const Poem poem = poems.at(poemIndex);
-    const ImageItem image = images.at(imageIndex);
-    m_picker.rememberPoem(poem.id);
-    m_picker.rememberImage(image.path);
+    const FavoritePair chosen = useFavorite
+        ? playableFavorites.at(qMax(0, m_picker.pickIndex(playableFavorites.size(), -1)))
+        : FavoritePair{poems.at(poemIndex), images.at(imageIndex)};
+    // Picking happens here, not in the worker. Drawing from a copy of m_picker
+    // left the original frozen on its seed, so every click replayed the same
+    // number and, combined with the avoid-consecutive rule, alternated between
+    // the same two images forever.
+    m_picker.rememberPoem(chosen.poem.id);
+    m_picker.rememberImage(chosen.image.path);
+    startRenderedApply(chosen.poem, chosen.image);
+}
 
+void MainWindow::startRenderedApply(const Poem &poem, const ImageItem &image) {
+    if (m_desktopBusy || m_previewBusy) return;
     m_desktopBusy = true;
     m_switchStartedGeneration = m_previewGeneration;
-    m_statusLabel->setText(QStringLiteral("正在随机生成并设置桌面…"));
+    m_statusLabel->setText(QStringLiteral("正在生成并设置桌面…"));
     const RenderSettings settings = m_config.render;
     const QSize target = targetWallpaperSize();
     const QString cache = m_store.wallpaperCachePath();
@@ -1403,6 +1886,7 @@ void MainWindow::applyFinished() {
             m_config.runtime.lastPoemId = m_previewPoem.id;
             m_config.runtime.lastImagePath = m_previewImage.path;
             m_config.runtime.lastSuccessTime = QDateTime::currentDateTime();
+            rememberWallpaper(m_previewPoem, m_previewImage, m_previewPath);
             m_statusLabel->setText(QStringLiteral("已应用到桌面"));
         } else {
             m_previewApplied = false;
@@ -1434,6 +1918,7 @@ void MainWindow::setPreviewState(const SwitchResult &result, bool applied) {
         m_config.runtime.lastPoemId = m_previewPoem.id;
         m_config.runtime.lastImagePath = m_previewImage.path;
         m_config.runtime.lastSuccessTime = QDateTime::currentDateTime();
+        rememberWallpaper(m_previewPoem, m_previewImage, m_previewPath);
     }
     persistConfig();
     updatePreview(m_previewPath);
@@ -1553,6 +2038,196 @@ void MainWindow::saveScheduleSettings() {
     persistConfig();
     updateScheduleTimer();
     updateStatusUi();
+}
+
+bool MainWindow::addImageSource(const QString &path, bool isFile, bool rescan) {
+    if (path.isEmpty()) return false;
+    const QString normalized = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+    if (!QFileInfo::exists(normalized)) return false;
+    for (const ImageSource &source : m_config.imageSources) {
+        if (source.isFile == isFile && normalizedPath(source.path) == normalizedPath(normalized)) {
+            if (rescan) startImageScan();
+            return true;
+        }
+    }
+    m_config.imageSources.append(ImageSource{normalized, true, true, isFile});
+    persistConfig();
+    updateImageUi();
+    if (rescan) startImageScan();
+    return true;
+}
+
+bool MainWindow::addSampleImageSource(QString *error) {
+    if (error) error->clear();
+    const QString sampleDir = QDir(m_store.rootPath()).filePath(QStringLiteral("samples"));
+    if (!QDir().mkpath(sampleDir)) {
+        if (error) *error = QStringLiteral("无法创建示例图片目录");
+        return false;
+    }
+    const QStringList names{
+        QStringLiteral("ink-mountains.jpg"),
+        QStringLiteral("moon-pines.jpg"),
+        QStringLiteral("dusk-lake.jpg"),
+    };
+    for (const QString &name : names) {
+        const QString target = QDir(sampleDir).filePath(name);
+        const QFileInfo existing(target);
+        if (existing.exists() && existing.size() > 0) continue;
+        if (existing.exists()) QFile::remove(target);
+        if (!QFile::copy(QStringLiteral(":/samples/%1").arg(name), target)) {
+            if (error) *error = QStringLiteral("示例图片复制失败：%1").arg(name);
+            return false;
+        }
+    }
+    if (!addImageSource(sampleDir, false, false)) {
+        if (error) *error = QStringLiteral("示例图片目录无法加入图片库");
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::addCurrentWallpaperSource(QString *error) {
+    if (error) error->clear();
+    const QString current = currentDesktopWallpaperPath();
+    if (current.isEmpty()) {
+        if (error) *error = QStringLiteral("Windows 没有报告当前桌面壁纸");
+        return false;
+    }
+    const QImage image(current);
+    if (image.isNull()) {
+        if (error) *error = QStringLiteral("当前桌面壁纸无法读取");
+        return false;
+    }
+    const QString sampleDir = QDir(m_store.rootPath()).filePath(QStringLiteral("samples"));
+    if (!QDir().mkpath(sampleDir)) {
+        if (error) *error = QStringLiteral("无法创建应用数据目录");
+        return false;
+    }
+    const QString target = QDir(sampleDir).filePath(QStringLiteral("current-wallpaper.jpg"));
+    if (!image.save(target, "JPG", 92)) {
+        if (error) *error = QStringLiteral("当前桌面壁纸复制失败");
+        return false;
+    }
+    if (!addImageSource(target, true, false)) {
+        if (error) *error = QStringLiteral("当前桌面壁纸无法加入图片库");
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::showOnboarding() {
+    const bool firstRun = m_firstRun;
+    QWizard wizard(this);
+    wizard.setWindowTitle(QStringLiteral("首次使用引导"));
+    wizard.setWizardStyle(QWizard::ModernStyle);
+    wizard.setOption(QWizard::NoBackButtonOnStartPage, true);
+    wizard.setButtonText(QWizard::NextButton, QStringLiteral("下一步"));
+    wizard.setButtonText(QWizard::BackButton, QStringLiteral("上一步"));
+    wizard.setButtonText(QWizard::FinishButton, QStringLiteral("开始使用"));
+    wizard.setButtonText(QWizard::CancelButton, QStringLiteral("稍后再说"));
+    wizard.addPage(new OnboardingIntroPage(&wizard));
+    auto *imagePage = new OnboardingImagePage(&wizard);
+    wizard.addPage(imagePage);
+    if (wizard.exec() != QDialog::Accepted) {
+        m_firstRun = false;
+        return;
+    }
+
+    QStringList problems;
+    bool ready = false;
+    if (imagePage->wantsSamples()) {
+        QString error;
+        if (addSampleImageSource(&error)) ready = true;
+        else problems << error;
+    }
+    if (imagePage->wantsCurrentWallpaper()) {
+        QString error;
+        if (addCurrentWallpaperSource(&error)) ready = true;
+        else problems << error;
+    }
+    const QString folder = imagePage->folderPath();
+    if (!folder.isEmpty()) {
+        if (addImageSource(folder, false, false)) ready = true;
+        else problems << QStringLiteral("文件夹无法访问：%1").arg(folder);
+    }
+    if (imagePage->wantsAutostart()) {
+        toggleAutostart(true);
+        if (!m_config.autostartEnabled) {
+            problems << QStringLiteral("开机自启未能写入，可稍后在「定时与高级」中重试");
+        }
+    }
+
+    m_firstRun = false;
+    if (ready) {
+        if (firstRun) m_pendingFirstWallpaper = true;
+        startImageScan();
+        if (firstRun) m_statusLabel->setText(QStringLiteral("正在准备第一张诗词壁纸…"));
+    } else if (!ready) {
+        m_statusLabel->setText(QStringLiteral("已跳过底图设置，可随时在「图片库」中添加图片"));
+    }
+    updateAllUi();
+    if (!problems.isEmpty()) {
+        appendLog(QStringLiteral("WARN"), problems.join(QStringLiteral("；")));
+        m_statusLabel->setText(problems.join(QStringLiteral("；")));
+    }
+}
+
+void MainWindow::toggleAutostart(bool enabled) {
+    QString error;
+    if (!WindowsAutoStart::setEnabled(enabled, &error)) {
+        m_statusLabel->setText(QStringLiteral("开机自启设置失败：%1").arg(error));
+        appendLog(QStringLiteral("ERROR"), m_statusLabel->text());
+        const QSignalBlocker blocker(m_autostartCheck);
+        m_autostartCheck->setChecked(m_config.autostartEnabled);
+        return;
+    }
+    m_config.autostartEnabled = enabled;
+    persistConfig();
+    m_statusLabel->setText(enabled ? QStringLiteral("已开启开机自启，登录 Windows 后会静默驻留托盘")
+                                   : QStringLiteral("已关闭开机自启"));
+    appendLog(QStringLiteral("INFO"), m_statusLabel->text());
+}
+
+void MainWindow::exportPreviewImage() {
+    if (!m_hasPreviewContent || !QFileInfo::exists(m_previewPath)) {
+        m_statusLabel->setText(QStringLiteral("当前没有可导出的预览"));
+        return;
+    }
+    QString directory = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    if (directory.isEmpty() || !QFileInfo(directory).isDir()) directory = QDir::homePath();
+    const QString suggested = QDir(directory).filePath(QStringLiteral("诗词壁纸-%1.png")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"))));
+    QString target = QFileDialog::getSaveFileName(this, QStringLiteral("导出壁纸"), suggested,
+        QStringLiteral("PNG 图片 (*.png);;JPEG 图片 (*.jpg *.jpeg)"));
+    if (target.isEmpty()) return;
+    const QString suffix = QFileInfo(target).suffix().toLower();
+    if (suffix.isEmpty()) target += QStringLiteral(".png");
+    else if (suffix != QStringLiteral("png") && suffix != QStringLiteral("jpg") && suffix != QStringLiteral("jpeg")) {
+        m_statusLabel->setText(QStringLiteral("请选择 PNG 或 JPG 格式"));
+        return;
+    }
+    QString error;
+    if (!WallpaperService::exportImage(m_previewPath, target, &error)) {
+        m_statusLabel->setText(QStringLiteral("导出失败：%1").arg(error));
+        appendLog(QStringLiteral("ERROR"), m_statusLabel->text());
+        return;
+    }
+    m_statusLabel->setText(QStringLiteral("已导出壁纸：%1").arg(QDir::toNativeSeparators(target)));
+    appendLog(QStringLiteral("INFO"), m_statusLabel->text());
+}
+
+void MainWindow::copyPreviewImage() {
+    if (!m_hasPreviewContent || !QFileInfo::exists(m_previewPath)) {
+        m_statusLabel->setText(QStringLiteral("当前没有可复制的预览"));
+        return;
+    }
+    QImage image = m_previewPixmap.isNull() ? QImage(m_previewPath) : m_previewPixmap.toImage();
+    if (image.isNull()) {
+        m_statusLabel->setText(QStringLiteral("预览图片无法读取"));
+        return;
+    }
+    QApplication::clipboard()->setImage(image);
+    m_statusLabel->setText(QStringLiteral("已复制当前壁纸到剪贴板"));
 }
 
 void MainWindow::clearCache() {

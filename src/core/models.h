@@ -116,13 +116,30 @@ struct RuntimeState {
     bool currentPreviewApplied = false;
 };
 
+// One successfully applied wallpaper. Kept in a short recent list and, when the
+// user stars it, in a smaller list that survives history trimming.
+struct WallpaperRecord {
+    QString poemId;
+    QString poemTitle;
+    QString imagePath;
+    QString wallpaperPath;
+    QDateTime appliedAt;
+};
+
 struct AppConfig {
-    int schemaVersion = 1;
+    static constexpr int currentSchemaVersion = 2;
+
+    int schemaVersion = currentSchemaVersion;
     QVector<ImageSource> imageSources;
     QString poetryLibraryPath;
     QVector<Poem> poems;
     bool scheduleEnabled = false;
     int intervalMinutes = 30;
+    bool autostartEnabled = false;
+    QVector<WallpaperRecord> history;
+    QVector<WallpaperRecord> favorites;
+    // Images the user removed from rotation without removing their folder.
+    QStringList excludedImages;
     RenderSettings render;
     RuntimeState runtime;
 };

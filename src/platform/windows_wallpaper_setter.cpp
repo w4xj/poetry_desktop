@@ -2,6 +2,9 @@
 
 #include <QFileInfo>
 
+#include <cwchar>
+#include <string>
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -47,6 +50,17 @@ bool WindowsWallpaperSetter::setWallpaper(const QString &absolutePath, QString *
     Q_UNUSED(absolutePath)
     if (error) *error = QStringLiteral("当前平台没有 Windows 壁纸实现");
     return false;
+#endif
+}
+
+QString currentDesktopWallpaperPath() {
+#ifdef Q_OS_WIN
+    std::wstring buffer(32768, L'\0');
+    if (!SystemParametersInfoW(SPI_GETDESKWALLPAPER, static_cast<UINT>(buffer.size()), buffer.data(), 0)) return {};
+    buffer.resize(std::wcslen(buffer.c_str()));
+    return QString::fromStdWString(buffer);
+#else
+    return {};
 #endif
 }
 

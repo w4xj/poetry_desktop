@@ -100,14 +100,15 @@ cd build && ctest --output-on-failure
 所以走 ctest 不需要额外配置。但**在 CLion 里点代码行号旁的绿色三角直接跑单个测试用例不走 ctest**，
 需要靠上面第 3 步的 PATH 模板兜住。
 
-当前基线：`poetry_tests` 17 项、`poetry_ui_tests` 5 项，全部通过。
+当前基线：`poetry_tests` 32 项、`poetry_ui_tests` 9 项，全部通过。
 
 ## 运行时数据位置
 
 应用数据在 `%LOCALAPPDATA%\PoetryDesktop\PoetryDesktop\`：
 
 ```
-config.json            配置（图片源、诗词、渲染设置、定时、运行态）
+config.json            配置（图片源、诗词、渲染设置、定时、历史/收藏/排除、自启、运行态）
+samples/               首启向导复制的示例图与「当前桌面壁纸」
 poetry_desktop.lock    单实例锁（陈旧锁 30 秒后自动失效）
 cache/wallpapers/      合成壁纸输出，保留最近 10 张
 logs/app.log           日志，超过 1MB 轮转为 app.log.1
@@ -117,11 +118,44 @@ logs/app.log           日志，超过 1MB 轮转为 app.log.1
 
 ## 首次运行
 
-全新环境启动后是空配置状态：只有 3 首内置默认诗词（`src/core/libraries.cpp` 的 `PoetryLibrary::defaultPoems()`），
-**没有任何图片来源**，顶部状态显示「资源不足」。需要到「图片库」页添加一个图片目录并等待扫描完成，
-才能生成预览。
+全新环境启动后会先弹出两页「首次使用引导」：
+
+1. 介绍应用能做什么；
+2. 选择底图 —— 内置 3 张示例图（推荐）、当前桌面壁纸、自己的图片文件夹，或跳过。
+
+选内置示例图时会从 qrc 复制到应用数据目录 `samples/`，不改动原图。完成后若已有可用图片，
+程序会等扫描结束自动生成并应用第一张壁纸；跳过的用户可随时到「图片库」添加。
+之后仍可从「更多 → 首次使用引导」重新打开向导，但重开只添加图片，不会自动换壁纸。
+
+新配置内置 8 首示例诗词（`PoetryLibrary::defaultPoems()`），其中一首是赠答双诗。
 
 关闭主窗口默认只是隐藏到系统托盘，程序继续运行；退出请用「更多 → 退出」或托盘菜单。
+
+## 历史、收藏与排除
+
+「历史」页保留最近 20 次成功应用的「诗词 + 底图」搭配：
+
+- **重新应用** —— 用当前字体/颜色/面板设置重新渲染，不依赖可能已被清理的缓存。
+- **收藏** —— 最多 50 条，与 20 条历史分开保存，不会被裁掉；随机切换有 1/4 概率回放收藏搭配。
+- **排除底图** —— 只是不参与随机切换，原文件不动，手动预览仍可使用；图片库页可恢复。
+
+「图片库」页的「排除选中图片」按钮是同一份排除列表的快捷入口。
+
+## 导出与复制
+
+预览操作栏的「导出」菜单提供：
+
+- **导出图片…** —— 保存当前成品为 PNG 或 JPG（按文件扩展名决定），采用原子写入。
+- **复制图片到剪贴板** —— 直接粘贴到聊天工具或文档。
+
+导出不会改变桌面，也不会清空预览。
+
+## 开机自启
+
+「定时与高级」页勾选「登录 Windows 后自动启动」。实现写当前用户的
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，无需管理员权限；
+启动命令行带 `--autostart`，登录后静默驻留托盘。每次正常启动都会重写该启动项，
+程序目录移动后不会留下失效路径。
 
 ## 分辨率与 DPI 适配
 
@@ -219,34 +253,48 @@ logs/app.log           日志，超过 1MB 轮转为 app.log.1
 
 ## 打包发布
 
-产物是自包含的绿色版目录压缩包，双击 `poetry_desktop.exe` 即可运行，目标机器不需要装 Qt。
+两种产物都自包含，目标机器不需要装 Qt：
+
+- **绿色版** `poetry_desktop-<版本>-windows-x64.zip`：解压后双击 `poetry_desktop.exe`。
+- **安装版** `poetry_desktop-<版本>-windows-x64-setup.exe`：NSIS 安装程序，按当前用户安装到
+  `%LOCALAPPDATA%\Programs\PoetryDesktop`，不需要管理员权限；创建开始菜单与桌面快捷方式，
+  并从 Windows「应用和功能」注册卸载项。卸载不会删除
+  `%LOCALAPPDATA%\PoetryDesktop\PoetryDesktop` 里的配置、示例图与缓存。
 
 ```bash
-export PATH="<Qt>/Tools/mingw1310_64/bin:$PATH"      # 需要 g++ / mingw32-make 在 PATH
+export PATH="<Qt>/Tools/mingw1310_64/bin:<Qt>/6.8.3/mingw_64/bin:$PATH"
+export PATH="/c/Program Files (x86)/NSIS:$PATH"       # 仅安装版需要 makensis
 cmake -DCMAKE_BUILD_TYPE=Release -G "MinGW Makefiles" -S . -B build/release
 cmake --build build/release --target poetry_desktop -j 10
-cd build/release && cpack -G ZIP
+
+cd build/release && cpack -G ZIP                      # 绿色版
+cmake --build build/release --target installer -j 10  # 安装版
 ```
 
-得到 `build/release/poetry_desktop-<版本>-windows-x64.zip`。
+NSIS 可用 `winget install NSIS.NSIS` 安装；`makensis.exe` 不在 PATH 时会跳过 `installer` 目标
+（配置阶段给出提示），ZIP 仍可正常打。
 
 ### 机制
 
-- 打包规则写在 `CMakeLists.txt` 末尾的 `install()` + `CPack` 段，用 CMake 原生机制，不另维护脚本。
-- `windeployqt` 通过 `install(CODE)` 在**安装阶段**执行。必须如此：它要分析的是暂存目录里的那个 exe，
-  而 CPack 正是先 install 到临时前缀、再把该前缀压成包。失败会以 `FATAL_ERROR` 中断打包，不会静默产出缺 DLL 的包。
-- 包名里的版本号来自 `project(poetry_desktop VERSION ...)`。**改版本只改 `CMakeLists.txt` 第 2 行**，包名自动跟随。
+- 两个产物共用同一套 `install()` 规则和同一份 `windeployqt` 暂存树，避免两套文件清单漂移。
+- `windeployqt` 通过 `install(CODE)` 在**安装阶段**执行。必须如此：它要分析的是暂存目录里的那个 exe。
+  ZIP 由 CPack 先 install 到临时前缀再压缩；安装版由 `installer` 目标执行
+  `cmake --install --prefix build/release/installer-stage`，再调用 `packaging/installer.nsi`。
+  `windeployqt` 失败会以 `FATAL_ERROR` 中断，不会静默产出缺 DLL 的包。
+- **为什么安装版不用 CPack 的 NSIS 生成器**：它的模板会把非管理员的默认安装目录改到
+  「文档」下（`$DOCUMENTS`），与本项目按用户、无提权的定位不符。`packaging/installer.nsi`
+  显式装到 `$LOCALAPPDATA\Programs\PoetryDesktop`，`RequestExecutionLevel user`，
+  与程序自身写 HKCU 开机自启的权限模型一致；目录页仍允许用户改路径。
+- 包名里的版本号来自 `project(poetry_desktop VERSION ...)`。**改版本只改 `CMakeLists.txt` 第 2 行**，
+  ZIP、安装包与安装器版本信息自动跟随。
 - 包内附带的用户说明是 `packaging/README.txt`（按钮语义、数据位置、支持边界），与开发者读的这份 README 分开维护。
 - Qt 的 `Concurrent` 在 MinGW 下是静态库，所以包里**没有** `Qt6Concurrent.dll`，这是正常的，不是漏打。
 
 ### CLion 里怎么打
 
-CLion 的图形界面不直接驱动 cpack，两种做法：
-
-1. External Tool：Settings → Tools → External Tools，Program 填
-   `<CLion>/bin/cmake/win/x64/bin/cpack.exe`，Arguments 填 `-G ZIP`，
-   Working directory 填 `$ProjectFileDir$/build/release`。
-2. 或直接在 IDE 内置终端跑上面三条命令。
+1. External Tool 打绿色版：Program 填 `<CLion>/bin/cmake/win/x64/bin/cpack.exe`，
+   Arguments 填 `-G ZIP`，Working directory 填 `$ProjectFileDir$/build/release`。
+2. 安装版在 CMake 面板的 target 列表里直接构建 `installer`，或在 IDE 内置终端跑上面两条命令。
 
 ### 每次打包后的验收标准
 
@@ -260,13 +308,21 @@ PATH="C:/Windows/System32;C:/Windows" ./poetry_desktop.exe
 判据三条：进程持续存活不闪退、没有缺 DLL 弹窗、
 `tasklist /FI "PID eq <pid>" /M` 能看到它从**自己所在目录**加载了 `Qt6Core/Qt6Gui/Qt6Widgets`。
 
-最近一次实测（2026-09-26）：包 23.5 MB、30 个条目，净化 PATH 下启动后加载 81 个模块，
-含包内自带的 4 个 Qt6 模块，存活无报错。
+安装版可以用静默参数验证。因为按用户安装，不需要提权：
+
+```bash
+./poetry_desktop-0.2.0-windows-x64-setup.exe /S /D=S:\temp\PoetryDesktop-test
+# 检查安装目录、开始菜单/桌面快捷方式与「应用和功能」条目后卸载
+"S:\temp\PoetryDesktop-test\Uninstall.exe" /S
+```
+
+实测（2026-10-20）：ZIP 包 24 MB、30 个条目；安装包 18 MB，静默安装到自定义目录后
+文件、快捷方式与卸载注册项齐全，净化 PATH 下启动后进程持续存活，卸载后目录和注册项均被清除。
 
 ### 已知缺项
 
-目前是"目录 + zip"的绿色版形态，**没有安装程序**（MSI / NSIS）、没有开机自启、没有代码签名，
-所以首次运行 Windows 会弹 SmartScreen 提示。这些在 `PRODUCT_SPEC.md` 里属于后续版本范围。
+已有绿色版和按用户安装的 NSIS 安装包，**没有代码签名**，首次运行 Windows 会弹 SmartScreen 提示；
+也没有 MSI 企业部署包。这些属于后续版本范围（见 `PRODUCT_SPEC.md`）。
 
 ## 故障排查
 

@@ -38,6 +38,7 @@ public:
     void setItems(const QVector<ImageItem> &items) { m_items = items; }
     const QVector<ImageItem> &items() const { return m_items; }
     QVector<ImageItem> validItems() const;
+    QVector<ImageItem> availableItems(const QStringList &excludedPaths) const;
 
 private:
     QVector<ImageItem> m_items;

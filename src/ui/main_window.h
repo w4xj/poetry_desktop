@@ -31,7 +31,7 @@ namespace poetry {
 class MainWindow final : public QMainWindow {
     Q_OBJECT
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(QWidget *parent = nullptr, bool enableOnboarding = true);
     ~MainWindow() override;
 
     void allowQuit();
@@ -79,6 +79,16 @@ private slots:
     void resetDisplaySettings();
     void showWindow();
     void quitFromTray();
+    void showOnboarding();
+    void toggleAutostart(bool enabled);
+    void exportPreviewImage();
+    void copyPreviewImage();
+    void applySelectedHistory();
+    void toggleSelectedFavorite();
+    void excludeSelectedHistoryImage();
+    void historyFilterChanged();
+    void historySelectionChanged();
+    void toggleSelectedImageExclusion();
 
 private:
     enum class ApplyKind { Preview, OriginalImage };
@@ -88,6 +98,9 @@ private:
     void loadState();
     void saveState();
     void persistConfig();
+    bool addImageSource(const QString &path, bool isFile, bool rescan);
+    bool addSampleImageSource(QString *error);
+    bool addCurrentWallpaperSource(QString *error);
     void updateAllUi();
     void updateImageUi();
     void updateImageFilesUi();
@@ -98,7 +111,12 @@ private:
     void updatePreview(const QString &path);
     void rescalePreview();
     void updatePreviewSummary();
+    void updateHistoryUi();
     void updateScheduleTimer();
+    QVector<ImageItem> availableImages() const;
+    void rememberWallpaper(const Poem &poem, const ImageItem &image, const QString &path);
+    bool selectedHistoryRecord(WallpaperRecord *record, bool *favorite) const;
+    void startRenderedApply(const Poem &poem, const ImageItem &image);
     void startImageScan();
     void schedulePreviewRefresh();
     void startPreviewRender();
@@ -125,6 +143,10 @@ private:
     QTabWidget *m_tabs = nullptr;
 
     bool m_allowQuit = false;
+    bool m_enableOnboarding = true;
+    bool m_firstRun = false;
+    bool m_pendingFirstWallpaper = false;
+    bool m_scanPending = false;
     bool m_desktopBusy = false;
     bool m_previewBusy = false;
     bool m_previewPending = false;
@@ -162,6 +184,10 @@ private:
     QListWidget *m_imageDirectories = nullptr;
     QListWidget *m_imageFiles = nullptr;
     QTableWidget *m_poemTable = nullptr;
+    QTableWidget *m_historyTable = nullptr;
+    QComboBox *m_historyFilter = nullptr;
+    QLabel *m_historySummaryLabel = nullptr;
+    QVector<WallpaperRecord> m_visibleHistory;
 
     QComboBox *m_fitCombo = nullptr;
     QComboBox *m_anchorCombo = nullptr;
@@ -180,6 +206,7 @@ private:
     QSpinBox *m_pairSpacingSpin = nullptr;
     QCheckBox *m_scheduleCheck = nullptr;
     QSpinBox *m_intervalSpin = nullptr;
+    QCheckBox *m_autostartCheck = nullptr;
 
     QPushButton *m_switchButton = nullptr;
     QPushButton *m_applyPreviewButton = nullptr;
@@ -190,6 +217,11 @@ private:
     QPushButton *m_setSelectedImageButton = nullptr;
     QPushButton *m_useSelectedImagePreviewButton = nullptr;
     QPushButton *m_clearCacheButton = nullptr;
+    QPushButton *m_excludeImageButton = nullptr;
+    QPushButton *m_applyHistoryButton = nullptr;
+    QPushButton *m_favoriteHistoryButton = nullptr;
+    QPushButton *m_excludeHistoryImageButton = nullptr;
+    QToolButton *m_exportMenuButton = nullptr;
 
     QFutureWatcher<ImageLibrary::ScanResult> m_scanWatcher;
     QFutureWatcher<SwitchResult> m_previewWatcher;

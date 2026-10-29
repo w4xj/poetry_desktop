@@ -2,6 +2,7 @@
 #include "core/libraries.h"
 #include "core/renderer.h"
 #include "core/wallpaper_service.h"
+#include "platform/windows_autostart.h"
 
 #include <QDir>
 #include <QFile>
@@ -83,6 +84,13 @@ private slots:
     void relationTagCanBeTurnedOff();
     void pairedPoemSurvivesConfigRoundTrip();
     void pairedPanelSplitsIntoTwoCardsWhenSeparate();
+    void defaultGiftPoemRendersAtFullHd();
+    void configRoundTripKeepsHistoryFavoritesAndExclusions();
+    void availableImagesSkipsExcludedPaths();
+    void exportImageWritesRequestedFormat();
+#ifdef Q_OS_WIN
+    void autostartCommandQuotesTheExecutable();
+#endif
 };
 
 void CoreTests::poemImportAndValidation() {
@@ -438,7 +446,7 @@ void CoreTests::configRoundTripAndCorruptionRecovery() {
     QVERIFY(store.load(loaded));
     QCOMPARE(loaded.imageSources.first().path, QStringLiteral("C:/中文 图片"));
     QVERIFY(!loaded.imageSources.first().enabled);
-    QCOMPARE(loaded.poems.size(), 3);
+    QCOMPARE(loaded.poems.size(), PoetryLibrary::defaultPoems().size());
     QCOMPARE(loaded.intervalMinutes, 1440);
     QCOMPARE(loaded.render.titleScale, 1.62);
     QCOMPARE(loaded.render.authorScale, 0.70);
@@ -813,6 +821,126 @@ void CoreTests::pairedPanelSplitsIntoTwoCardsWhenSeparate() {
     QCOMPARE(mergedRuns, 1);
     QCOMPARE(separateRuns, 2);
 }
+
+// The built-in gift poem is the longest text a fresh install can draw. If it
+// cannot fit at 1080p, every random draw that picks it fails on the most common
+// screen, so guard the shipped content against the renderer's fit algorithm.
+void CoreTests::defaultGiftPoemRendersAtFullHd() {
+    Poem gift;
+    for (const Poem &poem : PoetryLibrary::defaultPoems()) {
+        if (poem.relation == QStringLiteral("gift")) {
+            gift = poem;
+            break;
+        }
+    }
+    QVERIFY2(gift.isPaired(), "the default library lost its gift poem");
+
+    QImage canvas(1920, 1080, QImage::Format_RGB32);
+    canvas.fill(QColor(40, 60, 80));
+    WallpaperRenderer renderer;
+    QString error;
+    const QImage rendered = renderer.render(canvas, gift, RenderSettings{}, QSize(1920, 1080), &error);
+    QVERIFY2(!rendered.isNull(), qPrintable(error));
+    QCOMPARE(rendered.size(), QSize(1920, 1080));
+}
+
+void CoreTests::configRoundTripKeepsHistoryFavoritesAndExclusions() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    ConfigStore store(temp.path());
+    AppConfig config = ConfigStore::defaultConfig();
+    config.autostartEnabled = true;
+    config.excludedImages = {
+        QStringLiteral("C:/pics/a.jpg"),
+        QStringLiteral("C:/pics/b.jpg"),
+        QStringLiteral("C:/pics/a.jpg"),
+    };
+    WallpaperRecord older{QStringLiteral("default-001"), QStringLiteral("静夜思"),
+                          QStringLiteral("C:/pics/a.jpg"), QStringLiteral("C:/cache/a.png"),
+                          QDateTime::fromString(QStringLiteral("2026-10-19T08:30:00"), Qt::ISODate)};
+    WallpaperRecord newer{QStringLiteral("default-008"), QStringLiteral("醉赠刘二十八使君"),
+                          QStringLiteral("C:/pics/b.jpg"), QStringLiteral("C:/cache/b.png"),
+                          QDateTime::fromString(QStringLiteral("2026-10-20T09:15:00"), Qt::ISODate)};
+    config.history = {newer, older};
+    config.favorites = {older};
+
+    QString error;
+    QVERIFY2(store.save(config, &error), qPrintable(error));
+    AppConfig loaded;
+    QVERIFY(store.load(loaded));
+    QVERIFY(loaded.autostartEnabled);
+    QCOMPARE(loaded.schemaVersion, AppConfig::currentSchemaVersion);
+    QCOMPARE(loaded.excludedImages.size(), 2);
+    QCOMPARE(loaded.history.size(), 2);
+    QCOMPARE(loaded.history.first().poemId, newer.poemId);
+    QCOMPARE(loaded.history.first().poemTitle, newer.poemTitle);
+    QCOMPARE(loaded.history.first().appliedAt, newer.appliedAt);
+    QCOMPARE(loaded.favorites.size(), 1);
+    QCOMPARE(loaded.favorites.first().imagePath, older.imagePath);
+}
+
+void CoreTests::availableImagesSkipsExcludedPaths() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QDir dir(temp.path());
+    const auto writeImage = [&dir](const QString &name, const QColor &color) {
+        QImage image(32, 18, QImage::Format_RGB32);
+        image.fill(color);
+        const QString path = dir.filePath(name);
+        return image.save(path) ? path : QString();
+    };
+    const QString a = writeImage(QStringLiteral("a.png"), Qt::red);
+    const QString b = writeImage(QStringLiteral("b.png"), Qt::blue);
+    QVERIFY(!a.isEmpty() && !b.isEmpty());
+
+    const ImageLibrary::ScanResult result = ImageLibrary::scan(
+        {ImageSource{temp.path(), true, true, false}});
+    QCOMPARE(result.items.size(), 2);
+
+    ImageLibrary library;
+    library.setItems(result.items);
+    QCOMPARE(library.availableItems({}).size(), 2);
+#ifdef Q_OS_WIN
+    const QString excluded = a.toUpper();
+#else
+    const QString excluded = a;
+#endif
+    const QVector<ImageItem> filtered = library.availableItems({excluded});
+    QCOMPARE(filtered.size(), 1);
+    QCOMPARE(QFileInfo(filtered.first().path).fileName(), QStringLiteral("b.png"));
+}
+
+void CoreTests::exportImageWritesRequestedFormat() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QDir dir(temp.path());
+    QImage source(120, 80, QImage::Format_RGB32);
+    source.fill(QColor(30, 90, 60));
+    const QString sourcePath = dir.filePath(QStringLiteral("preview.png"));
+    QVERIFY(source.save(sourcePath));
+
+    QString error;
+    const QString pngTarget = dir.filePath(QStringLiteral("exported.png"));
+    const QString jpgTarget = dir.filePath(QStringLiteral("exported.jpg"));
+    QVERIFY2(WallpaperService::exportImage(sourcePath, pngTarget, &error), qPrintable(error));
+    QVERIFY2(WallpaperService::exportImage(sourcePath, jpgTarget, &error), qPrintable(error));
+    QCOMPARE(QImage(pngTarget).size(), source.size());
+    QCOMPARE(QImage(jpgTarget).size(), source.size());
+    QVERIFY(QFileInfo(pngTarget).size() > 0);
+    QVERIFY(QFileInfo(jpgTarget).size() > 0);
+
+    QVERIFY(!WallpaperService::exportImage(dir.filePath(QStringLiteral("missing.png")), pngTarget, &error));
+    QVERIFY(!error.isEmpty());
+}
+
+#ifdef Q_OS_WIN
+void CoreTests::autostartCommandQuotesTheExecutable() {
+    const QString command = WindowsAutoStart::commandLine(
+        QStringLiteral("C:/Program Files/Poetry Desktop/poetry_desktop.exe"));
+    QCOMPARE(command, QStringLiteral("\"C:\\Program Files\\Poetry Desktop\\poetry_desktop.exe\" --autostart"));
+    QVERIFY(WindowsAutoStart::commandLine(QString()).isEmpty());
+}
+#endif
 
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);

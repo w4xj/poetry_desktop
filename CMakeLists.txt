@@ -1,5 +1,5 @@
 ﻿cmake_minimum_required(VERSION 3.25)
-project(poetry_desktop VERSION 0.1.0 LANGUAGES CXX)
+project(poetry_desktop VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,6 +27,7 @@ set(POETRY_CORE_SOURCES
     src/core/libraries.cpp
     src/core/renderer.cpp
     src/core/wallpaper_service.cpp
+    src/platform/windows_autostart.cpp
     src/platform/windows_wallpaper_setter.cpp
 )
 
@@ -36,6 +37,7 @@ set(POETRY_HEADERS
     src/core/libraries.h
     src/core/renderer.h
     src/core/wallpaper_service.h
+    src/platform/windows_autostart.h
     src/platform/windows_wallpaper_setter.h
 )
 
@@ -114,15 +116,18 @@ if(WIN32 AND BUILD_TESTING)
 endif()
 
 # ---------------------------------------------------------------------------
-# Packaging. Build a Release tree, then run `cpack` inside it to get a
-# self-contained, double-clickable folder archive. See README.md "打包发布".
+# Packaging. Build a Release tree, then:
+#   cpack                                  -> portable ZIP
+#   cmake --build <build> --target installer -> per-user NSIS installer
+# See README.md "打包发布".
 # ---------------------------------------------------------------------------
 install(TARGETS poetry_desktop RUNTIME DESTINATION ".")
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/README.txt" DESTINATION ".")
 
 if(WIN32)
     # windeployqt must run against the staged copy, so it belongs in the install
-    # step: CPack installs into a scratch prefix and zips that directory.
+    # step: CPack installs into a scratch prefix, and the installer target does
+    # the same through `cmake --install`.
     set(POETRY_WINDEPLOYQT "${POETRY_QT_INSTALL_PREFIX}/bin/windeployqt.exe")
     install(CODE "
         execute_process(
@@ -142,9 +147,42 @@ set(CPACK_PACKAGE_NAME "poetry_desktop")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_VENDOR "PoetryDesktop")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "本地图片与诗词合成桌面壁纸")
-set(CPACK_GENERATOR ZIP)
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/w4xj/poetry_desktop")
+set(CPACK_GENERATOR "ZIP")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
 set(CPACK_VERBATIM_VARIABLES YES)
 include(CPack)
+
+if(WIN32)
+    # CPack's NSIS template redirects a non-admin install to Documents. This app
+    # is deliberately per-user, so packaging/installer.nsi installs to
+    # %LOCALAPPDATA%\Programs\PoetryDesktop instead and needs no elevation.
+    find_program(POETRY_MAKENSIS_EXECUTABLE makensis
+        HINTS "$ENV{ProgramFiles}/NSIS" "C:/Program Files (x86)/NSIS")
+    if(POETRY_MAKENSIS_EXECUTABLE)
+        set(POETRY_INSTALLER_STAGE "${CMAKE_CURRENT_BINARY_DIR}/installer-stage")
+        set(POETRY_INSTALLER_FILE "${CMAKE_CURRENT_BINARY_DIR}/poetry_desktop-${PROJECT_VERSION}-windows-x64-setup.exe")
+        file(TO_NATIVE_PATH "${POETRY_INSTALLER_STAGE}" POETRY_INSTALLER_STAGE_NATIVE)
+        file(TO_NATIVE_PATH "${POETRY_INSTALLER_FILE}" POETRY_INSTALLER_FILE_NATIVE)
+        file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/app_icon.ico" POETRY_INSTALLER_ICON_NATIVE)
+        add_custom_target(installer
+            COMMAND "${CMAKE_COMMAND}" -E remove_directory "${POETRY_INSTALLER_STAGE}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${POETRY_INSTALLER_STAGE}"
+            COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_CURRENT_BINARY_DIR}" --prefix "${POETRY_INSTALLER_STAGE}"
+            COMMAND "${POETRY_MAKENSIS_EXECUTABLE}" -V2
+                "-DSTAGE_DIR=${POETRY_INSTALLER_STAGE_NATIVE}"
+                "-DOUT_FILE=${POETRY_INSTALLER_FILE_NATIVE}"
+                "-DAPP_VERSION=${PROJECT_VERSION}"
+                "-DAPP_VERSION_QUAD=${PROJECT_VERSION}.0"
+                "-DICON_FILE=${POETRY_INSTALLER_ICON_NATIVE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/packaging/installer.nsi"
+            BYPRODUCTS "${POETRY_INSTALLER_FILE}"
+            DEPENDS poetry_desktop
+            COMMENT "Staging the deployment tree and building the NSIS installer"
+            VERBATIM)
+    else()
+        message(STATUS "makensis not found; the 'installer' target is unavailable")
+    endif()
+endif()
 
 
